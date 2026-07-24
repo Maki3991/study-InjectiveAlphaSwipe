@@ -32,16 +32,17 @@ test("server-renders the AlphaSwipe product shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>AlphaSwipe — Swipe signals\. Trade the thesis\.<\/title>/i);
-  assert.match(html, /focused signals/i);
   assert.match(html, /AlphaSwipe/);
+  assert.match(html, /class="deck-area"/);
+  assert.match(html, /class="card-stack"/);
   assert.match(html, /Discover/);
   assert.match(html, /Position/);
   assert.match(html, /Settings/);
   assert.doesNotMatch(html, /Watchlist|Activity/);
-  assert.match(html, /MAINNET · REAL FUNDS/i);
   assert.match(html, /META, NVDA, AAPL, TSLA, BTC, ETH, BNB, and INJ/);
-  assert.match(html, /Add key/);
-  assert.match(html, /Tap details · Hold for AI · Swipe to trade/);
+  assert.doesNotMatch(html, /MAINNET · REAL FUNDS/i);
+  assert.doesNotMatch(html, /Focused signal feed/i);
+  assert.doesNotMatch(html, /Tap details · Hold for AI · Swipe to trade/);
   assert.doesNotMatch(html, /Connect Keplr|Connect wallet/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
@@ -79,6 +80,7 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /LONG_PRESS_MS\s*=\s*560/);
   assert.match(swipeApp, /privateKeyRef/);
   assert.match(swipeApp, /openSignalChat/);
+  assert.doesNotMatch(swipeApp, /className="app-topbar"|className="feed-meta"|className="mainnet-live"/);
   assert.doesNotMatch(swipeApp, /Connect Keplr|connectKeplr|order-sheet|quick-order/);
   assert.doesNotMatch(swipeApp, /className="swipe-actions"|className="gesture-hint"/);
 

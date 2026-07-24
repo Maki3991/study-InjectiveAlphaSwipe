@@ -11,13 +11,10 @@ import {
   EyeOff,
   Flame,
   KeyRound,
-  Layers3,
-  ListFilter,
   LoaderCircle,
   LockKeyhole,
   MessageCircle,
   RefreshCw,
-  Search,
   Send,
   Settings,
   ShieldCheck,
@@ -29,7 +26,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   NEWS_ITEMS,
-  type NewsCategory,
   type NewsItem,
 } from "./news-data";
 import {
@@ -41,7 +37,6 @@ import {
 } from "@/lib/injective-client";
 
 type ActiveTab = "discover" | "position" | "settings";
-type FeedFilter = "all" | NewsCategory;
 type Decision = "skip" | OrderSide;
 
 type ChatMessage = {
@@ -51,12 +46,6 @@ type ChatMessage = {
 };
 
 const LONG_PRESS_MS = 560;
-
-const filters: { id: FeedFilter; label: string }[] = [
-  { id: "all", label: "All 8" },
-  { id: "stock", label: "Stocks" },
-  { id: "crypto", label: "Crypto" },
-];
 
 function shortAddress(address: string) {
   return `${address.slice(0, 7)}…${address.slice(-5)}`;
@@ -93,8 +82,6 @@ function buildAssistantAnswer(item: NewsItem, question: string) {
 export function AlphaSwipeApp() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("discover");
   const [signals, setSignals] = useState<NewsItem[]>(NEWS_ITEMS);
-  const [signalsBusy, setSignalsBusy] = useState(true);
-  const [filter, setFilter] = useState<FeedFilter>("all");
   const [index, setIndex] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [drag, setDrag] = useState({ x: 0, y: 0 });
@@ -110,7 +97,6 @@ export function AlphaSwipeApp() {
   const [keyBusy, setKeyBusy] = useState(false);
   const [tradeBusy, setTradeBusy] = useState(false);
   const [toast, setToast] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -126,14 +112,7 @@ export function AlphaSwipeApp() {
     longPressed: false,
   });
 
-  const filteredNews = useMemo(
-    () =>
-      filter === "all"
-        ? signals
-        : signals.filter((item) => item.category === filter),
-    [filter, signals],
-  );
-  const current = filteredNews[index] ?? null;
+  const current = signals[index] ?? null;
   const totalUnrealizedPnl = positions.reduce(
     (sum, position) => sum + position.unrealizedPnl,
     0,
@@ -162,8 +141,7 @@ export function AlphaSwipeApp() {
       .then((payload) => {
         if (payload.signals?.length === 8) setSignals(payload.signals);
       })
-      .catch(() => undefined)
-      .finally(() => setSignalsBusy(false));
+      .catch(() => undefined);
     return () => controller.abort();
   }, []);
 
@@ -449,85 +427,9 @@ export function AlphaSwipeApp() {
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
 
-      <header className="app-topbar">
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="Filter signals"
-          onClick={() => setSearchOpen((value) => !value)}
-        >
-          {searchOpen ? <X /> : <Search />}
-        </button>
-        <button
-          className="wordmark"
-          type="button"
-          onClick={() => setActiveTab("discover")}
-          aria-label="AlphaSwipe discover"
-        >
-          <span className="brand-mark">
-            <Layers3 />
-          </span>
-          <strong>AlphaSwipe</strong>
-        </button>
-        <button
-          className={`key-pill ${signerAddress ? "is-ready" : ""}`}
-          type="button"
-          onClick={() => setActiveTab("settings")}
-          aria-label="Open session key settings"
-        >
-          {signerAddress ? <LockKeyhole /> : <KeyRound />}
-          <span>{signerAddress ? "Key ready" : "Add key"}</span>
-        </button>
-      </header>
-
-      {searchOpen && (
-        <section className="signal-filter-panel">
-          <div>
-            <span>Signal universe</span>
-            <small>META · NVDA · AAPL · TSLA · BTC · ETH · BNB · INJ</small>
-          </div>
-          <div className="filter-row">
-            {filters.map((item) => (
-              <button
-                key={item.id}
-                className={filter === item.id ? "is-active" : ""}
-                type="button"
-                onClick={() => {
-                  setFilter(item.id);
-                  setIndex(0);
-                  setDetailsOpen(false);
-                  setSearchOpen(false);
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
       <section className="app-content">
         {activeTab === "discover" && (
           <section className="discover-view" aria-label="News signal feed">
-            <div className="feed-meta">
-              <div>
-                <span className="live-dot" />
-                <strong>
-                  {signalsBusy ? "Refreshing focused signals" : "Focused signal feed"}
-                </strong>
-                <small>{filteredNews.length} approved symbols in this deck</small>
-              </div>
-              <button type="button" onClick={() => setSearchOpen(true)}>
-                <ListFilter />
-                {filters.find((item) => item.id === filter)?.label}
-              </button>
-            </div>
-
-            <div className="mainnet-live">
-              <span><i /> MAINNET · REAL FUNDS</span>
-              <small>Tap details · Hold for AI · Swipe to trade</small>
-            </div>
-
             <div className="deck-area">
               <div className="card-stack">
                 <div className="stack-card stack-card-two" />
@@ -705,7 +607,6 @@ export function AlphaSwipeApp() {
                       type="button"
                       onClick={() => {
                         setIndex(0);
-                        setFilter("all");
                       }}
                     >
                       Restart signals
