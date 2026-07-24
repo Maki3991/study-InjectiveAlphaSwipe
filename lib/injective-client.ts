@@ -1,9 +1,11 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 export type OrderSide = "long" | "short";
 
 type PlaceOrderInput = {
-  injectiveAddress: string;
+  privateKey: string;
   marketQuery: string;
   side: OrderSide;
   notional: number;
@@ -15,6 +17,7 @@ type PlaceOrderResult = {
   ticker: string;
   price: number;
   quantity: number;
+  injectiveAddress: string;
 };
 
 export type DerivativePosition = {
@@ -30,100 +33,70 @@ export type DerivativePosition = {
   leverage: number;
 };
 
-let walletStrategyInstance: any;
-let walletModulesPromise: Promise<any> | undefined;
+let injectiveModulesPromise: Promise<any> | undefined;
 let marketsCache: any[] | undefined;
 
-async function loadWalletModules() {
-  if (!walletModulesPromise) {
-    walletModulesPromise = (async () => {
+function normalizePrivateKey(value: string) {
+  const normalized = value.trim().replace(/^0x/i, "");
+  if (!/^[a-f0-9]{64}$/i.test(normalized)) {
+    throw new Error("请输入 64 位十六进制 Injective 私钥。");
+  }
+  return normalized;
+}
+
+async function loadInjectiveModules() {
+  if (!injectiveModulesPromise) {
+    injectiveModulesPromise = (async () => {
       const bufferModule = await import("buffer");
       if (!(globalThis as any).Buffer) {
         (globalThis as any).Buffer = bufferModule.Buffer;
       }
 
       const [
-        walletBaseModule,
-        walletCoreModule,
-        walletCosmosModule,
         networksModule,
-        tsTypesModule,
         indexerModule,
         sdkModules,
+        sdkTx,
+        sdkAccounts,
         sdkUtils,
       ] = await Promise.all([
-        import("@injectivelabs/wallet-base"),
-        import("@injectivelabs/wallet-core"),
-        import("@injectivelabs/wallet-cosmos"),
         import("@injectivelabs/networks"),
-        import("@injectivelabs/ts-types"),
         import("@injectivelabs/sdk-ts/client/indexer"),
         import("@injectivelabs/sdk-ts/core/modules"),
+        import("@injectivelabs/sdk-ts/core/tx"),
+        import("@injectivelabs/sdk-ts/core/accounts"),
         import("@injectivelabs/sdk-ts/utils"),
       ]);
 
       return {
-        ...walletBaseModule,
-        ...walletCoreModule,
-        ...walletCosmosModule,
         ...networksModule,
-        ...tsTypesModule,
         ...indexerModule,
         ...sdkModules,
+        ...sdkTx,
+        ...sdkAccounts,
         ...sdkUtils,
       };
     })();
   }
 
-  return walletModulesPromise;
+  return injectiveModulesPromise;
 }
 
-async function getWalletStrategy() {
-  const modules = await loadWalletModules();
-
-  if (!walletStrategyInstance) {
-    const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
-    const keplrStrategy = new modules.CosmosWalletStrategy({
-      chainId: modules.ChainId.Mainnet,
-      wallet: modules.Wallet.Keplr,
-      endpoints: {
-        rest: endpoints.rest,
-        rpc: endpoints.rpc,
-      },
-    });
-    walletStrategyInstance = new modules.BaseWalletStrategy({
-      chainId: modules.ChainId.Mainnet,
-      wallet: modules.Wallet.Keplr,
-      strategies: {
-        [modules.Wallet.Keplr]: keplrStrategy,
-      },
-    });
+export async function deriveInjectiveAddress(privateKeyValue: string) {
+  const modules = await loadInjectiveModules();
+  try {
+    return modules.PrivateKey.fromHex(
+      normalizePrivateKey(privateKeyValue),
+    ).toBech32();
+  } catch {
+    throw new Error("私钥格式无效，无法派生 Injective 地址。");
   }
-
-  await walletStrategyInstance.setWallet(modules.Wallet.Keplr);
-  return { modules, walletStrategy: walletStrategyInstance };
-}
-
-export async function connectKeplr(): Promise<string> {
-  if (typeof window === "undefined" || !(window as any).keplr) {
-    throw new Error("未检测到 Keplr。请安装并解锁 Keplr 浏览器钱包后再试。");
-  }
-
-  const { walletStrategy } = await getWalletStrategy();
-  const addresses = await walletStrategy.getAddresses();
-  const address = addresses.find((value: string) => value?.startsWith("inj"));
-
-  if (!address) {
-    throw new Error("Keplr 没有返回 Injective 地址。请确认已允许连接 Mainnet。");
-  }
-
-  return address;
 }
 
 export async function fetchDerivativePositions(
   injectiveAddress: string,
 ): Promise<DerivativePosition[]> {
-  const modules = await loadWalletModules();
+  const modules = await loadInjectiveModules();
   const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
   const api = new modules.IndexerGrpcDerivativesApi(endpoints.indexer);
   const response = await api.fetchPositionsV2({ address: injectiveAddress });
@@ -201,7 +174,11 @@ function findMarket(markets: any[], marketQuery: string) {
 export async function placeDerivativeMarketOrder(
   input: PlaceOrderInput,
 ): Promise<PlaceOrderResult> {
-  const { modules, walletStrategy } = await getWalletStrategy();
+  const modules = await loadInjectiveModules();
+  const privateKey = modules.PrivateKey.fromHex(
+    normalizePrivateKey(input.privateKey),
+  );
+  const injectiveAddress = privateKey.toBech32();
   const markets = await fetchMarkets(modules);
   const market = findMarket(markets, input.marketQuery);
 
@@ -255,18 +232,18 @@ export async function placeDerivativeMarketOrder(
     Math.max(rawQuantity, Number(market.minQuantityTickSize || 0)),
     multipliers.quantityTensMultiplier,
   );
-  const subaccountId = modules.getDefaultSubaccountId(input.injectiveAddress);
+  const subaccountId = modules.getDefaultSubaccountId(injectiveAddress);
 
   const msg = modules.MsgCreateDerivativeMarketOrder.fromJSON({
     marketId: market.marketId,
     subaccountId,
-    injectiveAddress: input.injectiveAddress,
+    injectiveAddress,
     orderType:
       input.side === "long"
         ? modules.OrderType.BUY
         : modules.OrderType.SELL,
     triggerPrice: "0",
-    feeRecipient: input.injectiveAddress,
+    feeRecipient: injectiveAddress,
     price: modules.derivativePriceToChainPriceToFixed({
       value: allowedPrice,
       tensMultiplier: multipliers.priceTensMultiplier,
@@ -283,17 +260,14 @@ export async function placeDerivativeMarketOrder(
     }),
   });
 
-  const broadcaster = new modules.MsgBroadcaster({
-    walletStrategy,
+  const broadcaster = new modules.MsgBroadcasterWithPk({
+    privateKey,
     network: modules.Network.Mainnet,
     endpoints,
     simulateTx: true,
     gasBufferCoefficient: 1.1,
   });
-  const response = await broadcaster.broadcast({
-    injectiveAddress: input.injectiveAddress,
-    msgs: msg,
-  });
+  const response = await broadcaster.broadcast({ msgs: msg });
 
   if (response.code !== 0) {
     throw new Error(response.rawLog || "Injective 拒绝了这笔订单。");
@@ -304,5 +278,6 @@ export async function placeDerivativeMarketOrder(
     ticker: market.ticker,
     price: Number(allowedPrice),
     quantity: Number(allowedQuantity),
+    injectiveAddress,
   };
 }

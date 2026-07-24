@@ -4,7 +4,7 @@ import "./globals.css";
 
 const title = "AlphaSwipe — Swipe signals. Trade the thesis.";
 const description =
-  "Swipe curated crypto and RWA signals, then express your view with one-tap perpetual trades on Injective.";
+  "Swipe focused META, NVDA, AAPL, TSLA, BTC, ETH, BNB, and INJ signals, inspect earnings context, and trade Injective perpetuals.";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

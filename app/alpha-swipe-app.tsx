@@ -1,32 +1,39 @@
 "use client";
 
 import {
-  ArrowDownRight,
-  ArrowUpRight,
   BarChart3,
+  Bot,
   Check,
   CircleUserRound,
   Compass,
   ExternalLink,
+  Eye,
+  EyeOff,
   Flame,
+  KeyRound,
   Layers3,
   ListFilter,
   LoaderCircle,
+  LockKeyhole,
+  MessageCircle,
   RefreshCw,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   Sparkles,
   TrendingDown,
   TrendingUp,
-  WalletCards,
   X,
-  Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NEWS_ITEMS, type NewsCategory } from "./news-data";
 import {
-  connectKeplr,
+  NEWS_ITEMS,
+  type NewsCategory,
+  type NewsItem,
+} from "./news-data";
+import {
+  deriveInjectiveAddress,
   fetchDerivativePositions,
   placeDerivativeMarketOrder,
   type DerivativePosition,
@@ -37,68 +44,94 @@ type ActiveTab = "discover" | "position" | "settings";
 type FeedFilter = "all" | NewsCategory;
 type Decision = "skip" | OrderSide;
 
-type TradeRecord = {
+type ChatMessage = {
   id: string;
-  side: OrderSide;
-  market: string;
-  notional: number;
-  leverage: number;
-  txHash: string;
-  createdAt: string;
+  role: "assistant" | "user";
+  text: string;
 };
 
-const TRADES_STORAGE_KEY = "alphaswipe-trades-v1";
+const LONG_PRESS_MS = 560;
 
 const filters: { id: FeedFilter; label: string }[] = [
-  { id: "all", label: "All signals" },
+  { id: "all", label: "All 8" },
+  { id: "stock", label: "Stocks" },
   { id: "crypto", label: "Crypto" },
-  { id: "rwa", label: "RWA" },
 ];
 
 function shortAddress(address: string) {
   return `${address.slice(0, 7)}…${address.slice(-5)}`;
 }
 
-function actionLabel(action: Decision) {
-  return {
-    skip: "Skipped",
-    long: "Long setup ready",
-    short: "Short setup ready",
-  }[action];
+function buildAssistantAnswer(item: NewsItem, question: string) {
+  const normalized = question.toLowerCase();
+
+  if (
+    item.earnings &&
+    /earn|财报|revenue|margin|eps|利润|营收|估值/.test(normalized)
+  ) {
+    const metrics = item.earnings.metrics
+      .map((metric) => `${metric.label} ${metric.value} (${metric.change})`)
+      .join("；");
+    return `${item.earnings.period} 的关键数字是：${metrics}。${item.earnings.analysis} 下一步重点看：${item.earnings.nextWatch}`;
+  }
+  if (/bear|risk|down|空|风险|跌|反方/.test(normalized)) {
+    return `核心反方逻辑：${item.bearCase} 目前最需要监控的风险是 ${item.risk}。如果这个风险开始出现在数据或指引中，原有信号置信度应该下调。`;
+  }
+  if (/bull|up|long|多|涨|正方|机会/.test(normalized)) {
+    return `核心正方逻辑：${item.bullCase} 最近的可验证催化剂是 ${item.catalyst}。这只是研究框架，不是替你做方向决策。`;
+  }
+  if (/trade|position|leverage|交易|仓位|杠杆|下单/.test(normalized)) {
+    return `这条信号对应 ${item.marketLabel}，当前默认设置是主网真实资金交易。对话只做研究，不会替你下单；实际滑动前应重新检查订单簿、点差、保证金和最大可承受亏损。`;
+  }
+  if (/source|来源|真假|original|原文/.test(normalized)) {
+    return `当前信号来源是 ${item.source}，发布时间为 ${item.published}。详情页保留了原文入口；我会把新闻事实和 AlphaSwipe 的推演分开，避免把分析写成已发生事实。`;
+  }
+
+  return `${item.marketQuery} 的当前信号可以拆成三层：新闻事实是“${item.title}”；正方逻辑是“${item.bullCase}”；反方逻辑是“${item.bearCase}”。你可以继续追问财报、催化剂、风险或这条逻辑最容易在哪里失效。`;
 }
 
 export function AlphaSwipeApp() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("discover");
+  const [signals, setSignals] = useState<NewsItem[]>(NEWS_ITEMS);
+  const [signalsBusy, setSignalsBusy] = useState(true);
   const [filter, setFilter] = useState<FeedFilter>("all");
   const [index, setIndex] = useState(0);
-  const [flipped, setFlipped] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [exitAction, setExitAction] = useState<Decision | null>(null);
-  const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [positions, setPositions] = useState<DerivativePosition[]>([]);
   const [positionsBusy, setPositionsBusy] = useState(false);
   const [positionsError, setPositionsError] = useState("");
-  const [orderSide, setOrderSide] = useState<OrderSide | null>(null);
   const [notional, setNotional] = useState(100);
   const [leverage, setLeverage] = useState(3);
-  const [walletAddress, setWalletAddress] = useState("");
-  const [walletBusy, setWalletBusy] = useState(false);
+  const [privateKeyDraft, setPrivateKeyDraft] = useState("");
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [signerAddress, setSignerAddress] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
   const [tradeBusy, setTradeBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const privateKeyRef = useRef("");
+  const chatMessageId = useRef(0);
   const pointer = useRef({
     active: false,
     x: 0,
     y: 0,
     startedAt: 0,
+    longPressTimer: 0,
+    longPressed: false,
   });
 
   const filteredNews = useMemo(
     () =>
       filter === "all"
-        ? NEWS_ITEMS
-        : NEWS_ITEMS.filter((item) => item.category === filter),
-    [filter],
+        ? signals
+        : signals.filter((item) => item.category === filter),
+    [filter, signals],
   );
   const current = filteredNews[index] ?? null;
   const totalUnrealizedPnl = positions.reduce(
@@ -116,86 +149,26 @@ export function AlphaSwipeApp() {
 
   const showToast = useCallback((message: string) => {
     setToast(message);
-    window.setTimeout(() => setToast(""), 2200);
+    window.setTimeout(() => setToast(""), 2600);
   }, []);
 
   useEffect(() => {
-    try {
-      setTrades(JSON.parse(localStorage.getItem(TRADES_STORAGE_KEY) || "[]"));
-    } catch {
-      setTrades([]);
-    }
+    const controller = new AbortController();
+    void fetch("/api/signals", { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Signal refresh failed");
+        return response.json() as Promise<{ signals?: NewsItem[] }>;
+      })
+      .then((payload) => {
+        if (payload.signals?.length === 8) setSignals(payload.signals);
+      })
+      .catch(() => undefined)
+      .finally(() => setSignalsBusy(false));
+    return () => controller.abort();
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem(TRADES_STORAGE_KEY, JSON.stringify(trades));
-  }, [trades]);
-
-  useEffect(() => {
-    setIndex(0);
-    setFlipped(false);
-  }, [filter]);
-
-  const advance = useCallback(
-    (action: Decision) => {
-      if (!current || exitAction) return;
-      setExitAction(action);
-      showToast(actionLabel(action));
-      window.setTimeout(() => {
-        setIndex((value) => value + 1);
-        setFlipped(false);
-        setDrag({ x: 0, y: 0 });
-        setExitAction(null);
-      }, 330);
-    },
-    [current, exitAction, showToast],
-  );
-
-  const decide = useCallback(
-    (action: Decision) => {
-      if (!current || exitAction) return;
-      if (action === "long" || action === "short") {
-        setOrderSide(action);
-        setDrag({ x: 0, y: 0 });
-        showToast(actionLabel(action));
-        return;
-      }
-      advance(action);
-    },
-    [advance, current, exitAction, showToast],
-  );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        activeTab !== "discover" ||
-        orderSide ||
-        ["INPUT", "TEXTAREA", "SELECT"].includes(
-          (event.target as HTMLElement)?.tagName,
-        )
-      ) {
-        return;
-      }
-      const keyMap: Record<string, Decision> = {
-        ArrowLeft: "long",
-        ArrowRight: "short",
-        ArrowUp: "skip",
-      };
-      if (keyMap[event.key]) {
-        event.preventDefault();
-        decide(keyMap[event.key]);
-      }
-      if (event.key === " ") {
-        event.preventDefault();
-        setFlipped((value) => !value);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTab, decide, orderSide]);
 
   const refreshPositions = useCallback(
-    async (address = walletAddress) => {
+    async (address = signerAddress) => {
       if (!address) return;
       setPositionsBusy(true);
       setPositionsError("");
@@ -210,107 +183,259 @@ export function AlphaSwipeApp() {
         setPositionsBusy(false);
       }
     },
-    [showToast, walletAddress],
+    [showToast, signerAddress],
+  );
+
+  const advance = useCallback(
+    (action: Decision, message?: string) => {
+      if (!current || exitAction) return;
+      setExitAction(action);
+      showToast(message || (action === "skip" ? "Skipped" : "Order broadcast"));
+      window.setTimeout(() => {
+        setIndex((value) => value + 1);
+        setDetailsOpen(false);
+        setDrag({ x: 0, y: 0 });
+        setExitAction(null);
+      }, 330);
+    },
+    [current, exitAction, showToast],
+  );
+
+  const executeSwipeOrder = useCallback(
+    async (side: OrderSide) => {
+      if (!current || tradeBusy || exitAction) return;
+      if (!signerAddress || !privateKeyRef.current) {
+        showToast("请先在 Settings 添加会话私钥");
+        setActiveTab("settings");
+        return;
+      }
+
+      setTradeBusy(true);
+      showToast(`Signing ${side} · Mainnet real funds`);
+      try {
+        const result = await placeDerivativeMarketOrder({
+          privateKey: privateKeyRef.current,
+          marketQuery: current.marketQuery,
+          side,
+          notional,
+          leverage,
+        });
+        advance(side, `Broadcast · ${result.txHash.slice(0, 10)}…`);
+        void refreshPositions(result.injectiveAddress);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "订单提交失败");
+      } finally {
+        setTradeBusy(false);
+      }
+    },
+    [
+      advance,
+      current,
+      exitAction,
+      leverage,
+      notional,
+      refreshPositions,
+      showToast,
+      signerAddress,
+      tradeBusy,
+    ],
+  );
+
+  const decide = useCallback(
+    async (action: Decision) => {
+      if (!current || exitAction || chatOpen) return;
+      if (action === "skip") {
+        advance("skip");
+        return;
+      }
+      await executeSwipeOrder(action);
+    },
+    [advance, chatOpen, current, executeSwipeOrder, exitAction],
   );
 
   useEffect(() => {
-    if (activeTab === "position" && walletAddress) {
-      void refreshPositions(walletAddress);
-    }
-  }, [activeTab, refreshPositions, walletAddress]);
-
-  const connectWallet = async () => {
-    if (walletAddress) return walletAddress;
-    setWalletBusy(true);
-    try {
-      const address = await connectKeplr();
-      setWalletAddress(address);
-      showToast("Keplr connected · Injective Mainnet");
-      return address;
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "钱包连接失败");
-      throw error;
-    } finally {
-      setWalletBusy(false);
-    }
-  };
-
-  const executeOrder = async () => {
-    if (!current || !orderSide || tradeBusy) return;
-    setTradeBusy(true);
-    try {
-      const address = walletAddress || (await connectWallet());
-      const result = await placeDerivativeMarketOrder({
-        injectiveAddress: address,
-        marketQuery: current.marketQuery,
-        side: orderSide,
-        notional,
-        leverage,
-      });
-      const record: TradeRecord = {
-        id: `${result.txHash}-${Date.now()}`,
-        side: orderSide,
-        market: result.ticker,
-        notional,
-        leverage,
-        txHash: result.txHash,
-        createdAt: new Date().toISOString(),
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        activeTab !== "discover" ||
+        chatOpen ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(
+          (event.target as HTMLElement)?.tagName,
+        )
+      ) {
+        return;
+      }
+      const keyMap: Record<string, Decision> = {
+        ArrowLeft: "long",
+        ArrowRight: "short",
+        ArrowUp: "skip",
       };
-      setTrades((items) => [record, ...items]);
-      setOrderSide(null);
-      showToast(`Order broadcast · ${result.txHash.slice(0, 10)}…`);
-      advance(orderSide);
-      void refreshPositions(address);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "订单提交失败");
-    } finally {
-      setTradeBusy(false);
+      if (keyMap[event.key]) {
+        event.preventDefault();
+        void decide(keyMap[event.key]);
+      }
+      if (event.key === " ") {
+        event.preventDefault();
+        setDetailsOpen((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTab, chatOpen, decide]);
+
+  const openSignalChat = useCallback(() => {
+    if (!current) return;
+    setChatOpen(true);
+    setChatMessages([
+      {
+        id: `intro-${current.id}`,
+        role: "assistant",
+        text: `正在讨论 ${current.marketQuery}：${current.title}。你可以问我财报、正反逻辑、催化剂、风险，或者这条信号最容易在哪里失效。`,
+      },
+    ]);
+    setChatInput("");
+  }, [current]);
+
+  const clearLongPress = () => {
+    if (pointer.current.longPressTimer) {
+      window.clearTimeout(pointer.current.longPressTimer);
+      pointer.current.longPressTimer = 0;
     }
   };
 
-  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button, a, input")) return;
+  const onPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest("button, a, input, textarea")) {
+      return;
+    }
+    clearLongPress();
     pointer.current = {
       active: true,
       x: event.clientX,
       y: event.clientY,
       startedAt: Date.now(),
+      longPressTimer: window.setTimeout(() => {
+        if (!pointer.current.active) return;
+        pointer.current.active = false;
+        pointer.current.longPressed = true;
+        setDrag({ x: 0, y: 0 });
+        navigator.vibrate?.(28);
+        openSignalChat();
+      }, LONG_PRESS_MS),
+      longPressed: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointer.current.active || flipped) return;
-    setDrag({
+  const onPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (!pointer.current.active) return;
+    const nextDrag = {
       x: event.clientX - pointer.current.x,
       y: event.clientY - pointer.current.y,
-    });
+    };
+    if (Math.hypot(nextDrag.x, nextDrag.y) > 10) clearLongPress();
+    if (!detailsOpen) setDrag(nextDrag);
   };
 
-  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointer.current.active) return;
-    pointer.current.active = false;
-    const elapsed = Date.now() - pointer.current.startedAt;
-    const distance = Math.hypot(drag.x, drag.y);
-    if (distance < 9 && elapsed < 320) {
-      setFlipped((value) => !value);
-      setDrag({ x: 0, y: 0 });
-      return;
-    }
-    if (Math.abs(drag.x) > 88 && Math.abs(drag.x) > Math.abs(drag.y)) {
-      decide(drag.x < 0 ? "long" : "short");
-    } else if (
-      drag.y < -76 &&
-      Math.abs(drag.y) > Math.abs(drag.x) * 0.75
-    ) {
-      decide("skip");
-    }
-    setDrag({ x: 0, y: 0 });
+  const releasePointer = (event: React.PointerEvent<HTMLElement>) => {
     try {
       event.currentTarget.releasePointerCapture(event.pointerId);
     } catch {
-      // Pointer capture can already be released after a fast flick.
+      // A long press can release capture before pointerup.
     }
+  };
+
+  const onPointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    clearLongPress();
+    if (pointer.current.longPressed) {
+      pointer.current.longPressed = false;
+      releasePointer(event);
+      return;
+    }
+    if (!pointer.current.active) return;
+
+    pointer.current.active = false;
+    const elapsed = Date.now() - pointer.current.startedAt;
+    const distance = Math.hypot(drag.x, drag.y);
+
+    if (distance < 9 && elapsed < 360) {
+      setDetailsOpen((value) => !value);
+      setDrag({ x: 0, y: 0 });
+      releasePointer(event);
+      return;
+    }
+    if (!detailsOpen) {
+      if (Math.abs(drag.x) > 88 && Math.abs(drag.x) > Math.abs(drag.y)) {
+        void decide(drag.x < 0 ? "long" : "short");
+      } else if (
+        drag.y < -76 &&
+        Math.abs(drag.y) > Math.abs(drag.x) * 0.75
+      ) {
+        void decide("skip");
+      }
+    }
+    setDrag({ x: 0, y: 0 });
+    releasePointer(event);
+  };
+
+  const onPointerCancel = (event: React.PointerEvent<HTMLElement>) => {
+    clearLongPress();
+    pointer.current.active = false;
+    pointer.current.longPressed = false;
+    setDrag({ x: 0, y: 0 });
+    releasePointer(event);
+  };
+
+  const saveSessionKey = async () => {
+    if (!privateKeyDraft.trim()) return;
+    setKeyBusy(true);
+    try {
+      const address = await deriveInjectiveAddress(privateKeyDraft);
+      privateKeyRef.current = privateKeyDraft.trim();
+      setSignerAddress(address);
+      setPrivateKeyDraft("");
+      setShowPrivateKey(false);
+      setPositions([]);
+      setPositionsError("");
+      showToast(`Session key ready · ${shortAddress(address)}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "私钥格式无效");
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const removeSessionKey = () => {
+    privateKeyRef.current = "";
+    setPrivateKeyDraft("");
+    setSignerAddress("");
+    setPositions([]);
+    setPositionsError("");
+    showToast("Session key cleared");
+  };
+
+  const sendChatMessage = (question = chatInput) => {
+    const value = question.trim();
+    if (!value || !current || chatBusy) return;
+    chatMessageId.current += 1;
+    const userMessage: ChatMessage = {
+      id: `user-${chatMessageId.current}`,
+      role: "user",
+      text: value,
+    };
+    setChatMessages((messages) => [...messages, userMessage]);
+    setChatInput("");
+    setChatBusy(true);
+    window.setTimeout(() => {
+      chatMessageId.current += 1;
+      setChatMessages((messages) => [
+        ...messages,
+        {
+          id: `assistant-${chatMessageId.current}`,
+          role: "assistant",
+          text: buildAssistantAnswer(current, value),
+        },
+      ]);
+      setChatBusy(false);
+    }, 420);
   };
 
   const cardStyle = {
@@ -345,14 +470,13 @@ export function AlphaSwipeApp() {
           <strong>AlphaSwipe</strong>
         </button>
         <button
-          className={`wallet-pill ${walletAddress ? "is-connected" : ""}`}
+          className={`key-pill ${signerAddress ? "is-ready" : ""}`}
           type="button"
-          onClick={() => void connectWallet()}
-          disabled={walletBusy}
-          aria-label="Connect Keplr wallet"
+          onClick={() => setActiveTab("settings")}
+          aria-label="Open session key settings"
         >
-          {walletBusy ? <LoaderCircle className="spin" /> : <WalletCards />}
-          <span>{walletAddress ? shortAddress(walletAddress) : "Connect"}</span>
+          {signerAddress ? <LockKeyhole /> : <KeyRound />}
+          <span>{signerAddress ? "Key ready" : "Add key"}</span>
         </button>
       </header>
 
@@ -360,7 +484,7 @@ export function AlphaSwipeApp() {
         <section className="signal-filter-panel">
           <div>
             <span>Signal universe</span>
-            <small>Crypto + tokenized real-world assets</small>
+            <small>META · NVDA · AAPL · TSLA · BTC · ETH · BNB · INJ</small>
           </div>
           <div className="filter-row">
             {filters.map((item) => (
@@ -370,6 +494,8 @@ export function AlphaSwipeApp() {
                 type="button"
                 onClick={() => {
                   setFilter(item.id);
+                  setIndex(0);
+                  setDetailsOpen(false);
                   setSearchOpen(false);
                 }}
               >
@@ -386,13 +512,20 @@ export function AlphaSwipeApp() {
             <div className="feed-meta">
               <div>
                 <span className="live-dot" />
-                <strong>Curated market signals</strong>
-                <small>{filteredNews.length} stories in this deck</small>
+                <strong>
+                  {signalsBusy ? "Refreshing focused signals" : "Focused signal feed"}
+                </strong>
+                <small>{filteredNews.length} approved symbols in this deck</small>
               </div>
               <button type="button" onClick={() => setSearchOpen(true)}>
                 <ListFilter />
                 {filters.find((item) => item.id === filter)?.label}
               </button>
+            </div>
+
+            <div className="mainnet-live">
+              <span><i /> MAINNET · REAL FUNDS</span>
+              <small>Tap details · Hold for AI · Swipe to trade</small>
             </div>
 
             <div className="deck-area">
@@ -402,13 +535,14 @@ export function AlphaSwipeApp() {
                 {current ? (
                   <article
                     className={`news-card theme-${current.theme} ${
-                      flipped ? "is-flipped" : ""
+                      detailsOpen ? "is-flipped" : ""
                     } ${exitAction ? `exit-${exitAction}` : ""}`}
                     style={cardStyle}
                     onPointerDown={onPointerDown}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
-                    onPointerCancel={onPointerUp}
+                    onPointerCancel={onPointerCancel}
+                    onContextMenu={(event) => event.preventDefault()}
                   >
                     <div
                       className="swipe-stamp stamp-long"
@@ -428,6 +562,13 @@ export function AlphaSwipeApp() {
                     >
                       SKIP
                     </div>
+                    {tradeBusy && (
+                      <div className="trade-lock">
+                        <LoaderCircle className="spin" />
+                        <strong>Signing Mainnet order</strong>
+                        <small>Keep this page open</small>
+                      </div>
+                    )}
                     <div className="card-inner">
                       <div className="card-face card-front">
                         <div className="card-orbit orbit-one" />
@@ -465,7 +606,7 @@ export function AlphaSwipeApp() {
                         </div>
                         <div className="flip-hint">
                           <Sparkles />
-                          Tap for thesis & trade setup
+                          Tap for details · Hold to ask AI
                         </div>
                       </div>
 
@@ -474,8 +615,8 @@ export function AlphaSwipeApp() {
                           <span className="source-badge">{current.marketLabel}</span>
                           <button
                             type="button"
-                            onClick={() => setFlipped(false)}
-                            aria-label="Flip to headline"
+                            onClick={() => setDetailsOpen(false)}
+                            aria-label="Close signal details"
                           >
                             <X />
                           </button>
@@ -483,6 +624,28 @@ export function AlphaSwipeApp() {
                           <p>{current.summary}</p>
                         </div>
                         <div className="back-scroll">
+                          {current.earnings && (
+                            <section className="earnings-panel">
+                              <div className="earnings-heading">
+                                <span>EARNINGS · {current.earnings.period}</span>
+                                <strong>{current.earnings.headline}</strong>
+                              </div>
+                              <div className="earnings-metrics">
+                                {current.earnings.metrics.map((metric) => (
+                                  <div key={metric.label}>
+                                    <small>{metric.label}</small>
+                                    <strong>{metric.value}</strong>
+                                    <span>{metric.change}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <p>{current.earnings.analysis}</p>
+                              <div className="next-watch">
+                                <small>Next watch</small>
+                                <strong>{current.earnings.nextWatch}</strong>
+                              </div>
+                            </section>
+                          )}
                           <div className="thesis-grid">
                             <div>
                               <span className="thesis-label bull">
@@ -511,59 +674,6 @@ export function AlphaSwipeApp() {
                               <strong>{current.horizon}</strong>
                             </div>
                           </div>
-                          <div className="quick-order">
-                            <div className="quick-order-heading">
-                              <span>
-                                <Zap /> One-tap setup
-                              </span>
-                              <small>Injective Mainnet</small>
-                            </div>
-                            <div className="order-controls">
-                              <label>
-                                <span>Notional</span>
-                                <strong>${notional}</strong>
-                                <input
-                                  type="range"
-                                  min="25"
-                                  max="500"
-                                  step="25"
-                                  value={notional}
-                                  onChange={(event) =>
-                                    setNotional(Number(event.target.value))
-                                  }
-                                />
-                              </label>
-                              <label>
-                                <span>Leverage</span>
-                                <strong>{leverage}×</strong>
-                                <input
-                                  type="range"
-                                  min="1"
-                                  max="10"
-                                  value={leverage}
-                                  onChange={(event) =>
-                                    setLeverage(Number(event.target.value))
-                                  }
-                                />
-                              </label>
-                            </div>
-                            <div className="trade-buttons">
-                              <button
-                                className="long-button"
-                                type="button"
-                                onClick={() => setOrderSide("long")}
-                              >
-                                <ArrowUpRight /> Long
-                              </button>
-                              <button
-                                className="short-button"
-                                type="button"
-                                onClick={() => setOrderSide("short")}
-                              >
-                                <ArrowDownRight /> Short
-                              </button>
-                            </div>
-                          </div>
                           <a
                             className="source-link"
                             href={current.sourceUrl}
@@ -572,6 +682,13 @@ export function AlphaSwipeApp() {
                           >
                             Read original signal <ExternalLink />
                           </a>
+                          <button
+                            className="ask-ai-button"
+                            type="button"
+                            onClick={openSignalChat}
+                          >
+                            <MessageCircle /> Discuss this signal with AI
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -581,8 +698,8 @@ export function AlphaSwipeApp() {
                     <span><Check /></span>
                     <h1>Signal deck cleared</h1>
                     <p>
-                      You reviewed every story in this feed. Restart the deck
-                      whenever you want another pass.
+                      You reviewed every focused signal. Restart the deck for
+                      another pass.
                     </p>
                     <button
                       type="button"
@@ -596,7 +713,6 @@ export function AlphaSwipeApp() {
                   </article>
                 )}
               </div>
-
             </div>
           </section>
         )}
@@ -608,7 +724,7 @@ export function AlphaSwipeApp() {
                 <span>INJECTIVE MAINNET</span>
                 <h1>Positions</h1>
               </div>
-              {walletAddress ? (
+              {signerAddress ? (
                 <button
                   className="refresh-positions"
                   type="button"
@@ -619,19 +735,19 @@ export function AlphaSwipeApp() {
                   Refresh
                 </button>
               ) : (
-                <span className="network-chip"><i /> Mainnet</span>
+                <span className="network-chip"><i /> Add key</span>
               )}
             </header>
 
-            {walletAddress ? (
+            {signerAddress ? (
               <>
                 <div className="position-summary-card">
                   <div className="position-account">
                     <span>
                       <i />
-                      {shortAddress(walletAddress)}
+                      {shortAddress(signerAddress)}
                     </span>
-                    <small>Live indexer data</small>
+                    <small>Session signer · live indexer</small>
                   </div>
                   <div className="pnl-hero">
                     <small>Total unrealized PnL</small>
@@ -745,8 +861,8 @@ export function AlphaSwipeApp() {
                       <BarChart3 />
                       <h2>No open positions</h2>
                       <p>
-                        Swipe left or right on a signal to create your first
-                        Mainnet position.
+                        Swipe left or right on a signal to place a direct
+                        Mainnet order.
                       </p>
                       <button
                         type="button"
@@ -760,17 +876,17 @@ export function AlphaSwipeApp() {
               </>
             ) : (
               <div className="position-connect-state">
-                <span><BarChart3 /></span>
-                <h2>See every position and PnL</h2>
+                <span><KeyRound /></span>
+                <h2>Add a session trading key</h2>
                 <p>
-                  Connect Keplr to read live Injective Mainnet positions,
-                  mark prices and unrealized profit or loss.
+                  Positions are read from the Injective address derived inside
+                  this browser. The private key is never uploaded or persisted.
                 </p>
-                <button type="button" onClick={() => void connectWallet()}>
-                  <WalletCards />
-                  Connect Keplr
+                <button type="button" onClick={() => setActiveTab("settings")}>
+                  <LockKeyhole />
+                  Open key settings
                 </button>
-                <small>Read-only until you approve a trade in your wallet.</small>
+                <small>Mainnet orders use real funds.</small>
               </div>
             )}
           </section>
@@ -780,19 +896,91 @@ export function AlphaSwipeApp() {
           <section className="page-view settings-view">
             <header className="page-heading">
               <div>
-                <span>PRODUCT PREVIEW</span>
+                <span>LOCAL SESSION</span>
                 <h1>Settings</h1>
               </div>
               <CircleUserRound />
             </header>
             <div className="settings-scroll">
               <section className="settings-profile">
-                <span><Layers3 /></span>
+                <span>{signerAddress ? <LockKeyhole /> : <KeyRound />}</span>
                 <div>
-                  <strong>AlphaSwipe Trader</strong>
-                  <small>Crypto + RWA discovery</small>
+                  <strong>
+                    {signerAddress
+                      ? shortAddress(signerAddress)
+                      : "No session signer"}
+                  </strong>
+                  <small>
+                    {signerAddress
+                      ? "Private key held in memory only"
+                      : "Add a key to enable direct trading"}
+                  </small>
                 </div>
               </section>
+
+              <section className="settings-card private-key-card">
+                <div className="settings-title">
+                  <div>
+                    <h2>Session private key</h2>
+                    <p>Used locally for direct Mainnet signing.</p>
+                  </div>
+                  <LockKeyhole />
+                </div>
+                {signerAddress ? (
+                  <div className="key-ready-state">
+                    <span><i /> Ready for direct signing</span>
+                    <strong>{signerAddress}</strong>
+                    <button type="button" onClick={removeSessionKey}>
+                      Clear session key
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <label className="private-key-input">
+                      <span>Private key</span>
+                      <div>
+                        <input
+                          type={showPrivateKey ? "text" : "password"}
+                          value={privateKeyDraft}
+                          onChange={(event) =>
+                            setPrivateKeyDraft(event.target.value)
+                          }
+                          placeholder="64-character hex key"
+                          autoComplete="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPrivateKey((value) => !value)}
+                          aria-label={
+                            showPrivateKey
+                              ? "Hide private key"
+                              : "Show private key"
+                          }
+                        >
+                          {showPrivateKey ? <EyeOff /> : <Eye />}
+                        </button>
+                      </div>
+                    </label>
+                    <button
+                      className="save-key-button"
+                      type="button"
+                      onClick={() => void saveSessionKey()}
+                      disabled={keyBusy || !privateKeyDraft.trim()}
+                    >
+                      {keyBusy ? <LoaderCircle className="spin" /> : <KeyRound />}
+                      Use for this session
+                    </button>
+                  </>
+                )}
+                <p className="key-security-note">
+                  Never paste a seed phrase. This version accepts a raw private
+                  key, keeps it only in this tab’s memory, never sends it to the
+                  AlphaSwipe server, and clears it on refresh or tab close.
+                </p>
+              </section>
+
               <section className="settings-card">
                 <div className="settings-title">
                   <div>
@@ -805,16 +993,18 @@ export function AlphaSwipeApp() {
                   <span><i /> Injective Mainnet</span>
                   <small>injective-1</small>
                 </div>
-                <p className="settings-note">
-                  Mainnet is active. Orders use real funds, are simulated for
-                  gas, and require an explicit Keplr signature before broadcast.
+                <p className="settings-note danger-copy">
+                  Swiping left or right signs and broadcasts immediately with
+                  real funds. There is no wallet popup and no second
+                  confirmation.
                 </p>
               </section>
+
               <section className="settings-card">
                 <div className="settings-title">
                   <div>
-                    <h2>Default trade setup</h2>
-                    <p>Used whenever you swipe left or right.</p>
+                    <h2>Direct trade setup</h2>
+                    <p>Applied immediately to every horizontal swipe.</p>
                   </div>
                   <Settings />
                 </div>
@@ -840,11 +1030,14 @@ export function AlphaSwipeApp() {
                   />
                 </label>
               </section>
+
               <section className="risk-note">
                 <ShieldCheck />
                 <p>
-                  News signals are research prompts, not financial advice.
-                  Perpetuals are leveraged products and can liquidate quickly.
+                  Direct private-key trading removes the wallet confirmation
+                  boundary. Use a dedicated low-balance trading account, not a
+                  primary wallet. News and AI responses are research prompts,
+                  not financial advice.
                 </p>
               </section>
             </div>
@@ -863,7 +1056,10 @@ export function AlphaSwipeApp() {
         <button
           className={activeTab === "position" ? "is-active" : ""}
           type="button"
-          onClick={() => setActiveTab("position")}
+          onClick={() => {
+            setActiveTab("position");
+            if (signerAddress) void refreshPositions(signerAddress);
+          }}
         >
           <BarChart3 /><span>Position</span>
         </button>
@@ -876,67 +1072,79 @@ export function AlphaSwipeApp() {
         </button>
       </nav>
 
-      {orderSide && current && (
-        <div className="sheet-backdrop" role="presentation">
+      {chatOpen && current && (
+        <div className="sheet-backdrop chat-backdrop" role="presentation">
           <section
-            className="order-sheet"
+            className="ai-sheet"
             role="dialog"
             aria-modal="true"
-            aria-label={`${orderSide} order confirmation`}
+            aria-label={`${current.marketQuery} signal AI discussion`}
           >
-            <div className="sheet-handle" />
-            <div className="order-sheet-heading">
+            <header className="ai-sheet-heading">
+              <span><Bot /></span>
               <div>
-                <span className={orderSide}>
-                  {orderSide === "long" ? <TrendingUp /> : <TrendingDown />}
-                </span>
-                <div>
-                  <small>MARKET ORDER · MAINNET</small>
-                  <h2>{orderSide === "long" ? "Long" : "Short"} {current.marketLabel}</h2>
-                </div>
+                <small>SIGNAL AI · {current.marketQuery}</small>
+                <h2>Discuss the thesis</h2>
               </div>
               <button
                 type="button"
-                onClick={() => setOrderSide(null)}
-                aria-label="Close order sheet"
+                onClick={() => setChatOpen(false)}
+                aria-label="Close AI discussion"
               >
                 <X />
               </button>
-            </div>
-            <div className="order-summary">
-              <div><small>Notional</small><strong>${notional}.00</strong></div>
-              <div><small>Leverage</small><strong>{leverage}×</strong></div>
-              <div><small>Est. margin</small><strong>${(notional / leverage).toFixed(2)}</strong></div>
-              <div><small>Max slippage</small><strong>0.50%</strong></div>
-            </div>
-            <div className="execution-note">
-              <ShieldCheck />
-              <p>
-                AlphaSwipe will resolve the active {current.marketQuery} perpetual
-                market, read the live orderbook, simulate gas, and ask Keplr to
-                sign one native Injective Mainnet market order using real funds.
-              </p>
-            </div>
-            <button
-              className={`execute-button ${orderSide}`}
-              type="button"
-              onClick={() => void executeOrder()}
-              disabled={tradeBusy || walletBusy}
-            >
-              {tradeBusy || walletBusy ? (
-                <LoaderCircle className="spin" />
-              ) : (
-                <Zap />
+            </header>
+            <div className="ai-messages">
+              {chatMessages.map((message) => (
+                <p className={message.role} key={message.id}>
+                  {message.text}
+                </p>
+              ))}
+              {chatBusy && (
+                <p className="assistant thinking">
+                  <LoaderCircle className="spin" /> Reviewing the signal…
+                </p>
               )}
-              {tradeBusy
-                ? "Preparing Injective order…"
-                : walletAddress
-                  ? `Sign & open ${orderSide}`
-                  : `Connect Keplr & open ${orderSide}`}
-            </button>
-            <p className="order-disclaimer">
-              Mainnet · real funds · wallet approval required
-            </p>
+            </div>
+            <div className="ai-prompts">
+              {(current.earnings
+                ? ["解读这份财报", "最大的风险是什么？", "多头逻辑哪里会失效？"]
+                : ["核心催化剂是什么？", "最大的风险是什么？", "多头逻辑哪里会失效？"]
+              ).map((prompt) => (
+                <button
+                  type="button"
+                  key={prompt}
+                  onClick={() => sendChatMessage(prompt)}
+                  disabled={chatBusy}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+            <form
+              className="ai-composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                sendChatMessage();
+              }}
+            >
+              <input
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder={`Ask about ${current.marketQuery}…`}
+                aria-label="Ask Signal AI"
+              />
+              <button
+                type="submit"
+                disabled={!chatInput.trim() || chatBusy}
+                aria-label="Send message"
+              >
+                <Send />
+              </button>
+            </form>
+            <small className="ai-disclaimer">
+              Contextual research only · this chat cannot place trades
+            </small>
           </section>
         </div>
       )}
