@@ -23,7 +23,7 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   NEWS_ITEMS,
   type NewsItem,
@@ -46,9 +46,35 @@ type ChatMessage = {
 };
 
 const LONG_PRESS_MS = 560;
+const LOCAL_PRIVATE_KEY_STORAGE_KEY = "alphaswipe.injectivePrivateKey";
 
 function shortAddress(address: string) {
   return `${address.slice(0, 7)}…${address.slice(-5)}`;
+}
+
+function readStoredPrivateKey() {
+  try {
+    return window.localStorage.getItem(LOCAL_PRIVATE_KEY_STORAGE_KEY)?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+function storePrivateKey(privateKey: string) {
+  try {
+    window.localStorage.setItem(LOCAL_PRIVATE_KEY_STORAGE_KEY, privateKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearStoredPrivateKey() {
+  try {
+    window.localStorage.removeItem(LOCAL_PRIVATE_KEY_STORAGE_KEY);
+  } catch {
+    // Local storage can be unavailable in restricted browser modes.
+  }
 }
 
 function buildAssistantAnswer(item: NewsItem, question: string) {
@@ -129,6 +155,34 @@ export function AlphaSwipeApp() {
   const showToast = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
+  }, []);
+
+  useEffect(() => {
+    const storedPrivateKey = readStoredPrivateKey();
+    if (!storedPrivateKey) return;
+
+    let cancelled = false;
+    setKeyBusy(true);
+    void deriveInjectiveAddress(storedPrivateKey)
+      .then((address) => {
+        if (cancelled) return;
+        privateKeyRef.current = storedPrivateKey;
+        setSignerAddress(address);
+        setPrivateKeyDraft("");
+        setPositionsError("");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        clearStoredPrivateKey();
+        privateKeyRef.current = "";
+      })
+      .finally(() => {
+        if (!cancelled) setKeyBusy(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -363,17 +417,23 @@ export function AlphaSwipeApp() {
   };
 
   const saveSessionKey = async () => {
-    if (!privateKeyDraft.trim()) return;
+    const trimmedPrivateKey = privateKeyDraft.trim();
+    if (!trimmedPrivateKey) return;
     setKeyBusy(true);
     try {
-      const address = await deriveInjectiveAddress(privateKeyDraft);
-      privateKeyRef.current = privateKeyDraft.trim();
+      const address = await deriveInjectiveAddress(trimmedPrivateKey);
+      const stored = storePrivateKey(trimmedPrivateKey);
+      privateKeyRef.current = trimmedPrivateKey;
       setSignerAddress(address);
       setPrivateKeyDraft("");
       setShowPrivateKey(false);
       setPositions([]);
       setPositionsError("");
-      showToast(`Session key ready · ${shortAddress(address)}`);
+      showToast(
+        stored
+          ? `Local key saved · ${shortAddress(address)}`
+          : `Session key ready · storage blocked`,
+      );
     } catch (error) {
       showToast(error instanceof Error ? error.message : "私钥格式无效");
     } finally {
@@ -383,11 +443,12 @@ export function AlphaSwipeApp() {
 
   const removeSessionKey = () => {
     privateKeyRef.current = "";
+    clearStoredPrivateKey();
     setPrivateKeyDraft("");
     setSignerAddress("");
     setPositions([]);
     setPositionsError("");
-    showToast("Session key cleared");
+    showToast("Local key cleared");
   };
 
   const sendChatMessage = (question = chatInput) => {
@@ -781,7 +842,8 @@ export function AlphaSwipeApp() {
                 <h2>Add a session trading key</h2>
                 <p>
                   Positions are read from the Injective address derived inside
-                  this browser. The private key is never uploaded or persisted.
+                  this browser. The private key is stored locally on this
+                  device and is never uploaded.
                 </p>
                 <button type="button" onClick={() => setActiveTab("settings")}>
                   <LockKeyhole />
@@ -813,7 +875,7 @@ export function AlphaSwipeApp() {
                   </strong>
                   <small>
                     {signerAddress
-                      ? "Private key held in memory only"
+                      ? "Private key saved on this device"
                       : "Add a key to enable direct trading"}
                   </small>
                 </div>
@@ -832,7 +894,7 @@ export function AlphaSwipeApp() {
                     <span><i /> Ready for direct signing</span>
                     <strong>{signerAddress}</strong>
                     <button type="button" onClick={removeSessionKey}>
-                      Clear session key
+                      Clear saved key
                     </button>
                   </div>
                 ) : (
@@ -871,14 +933,15 @@ export function AlphaSwipeApp() {
                       disabled={keyBusy || !privateKeyDraft.trim()}
                     >
                       {keyBusy ? <LoaderCircle className="spin" /> : <KeyRound />}
-                      Use for this session
+                      Save local key
                     </button>
                   </>
                 )}
                 <p className="key-security-note">
                   Never paste a seed phrase. This version accepts a raw private
-                  key, keeps it only in this tab’s memory, never sends it to the
-                  AlphaSwipe server, and clears it on refresh or tab close.
+                  key, stores it in this browser’s local storage for refreshes,
+                  and never sends it to the AlphaSwipe server. Use a dedicated
+                  low-balance trading key.
                 </p>
               </section>
 

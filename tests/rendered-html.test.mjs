@@ -78,6 +78,10 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(injectiveClient, /derivativePriceFromChainPriceToFixed/);
   assert.doesNotMatch(injectiveClient, /WalletStrategy|Wallet\.Keplr/);
   assert.match(swipeApp, /LONG_PRESS_MS\s*=\s*560/);
+  assert.match(swipeApp, /LOCAL_PRIVATE_KEY_STORAGE_KEY/);
+  assert.match(swipeApp, /localStorage\.getItem/);
+  assert.match(swipeApp, /localStorage\.setItem/);
+  assert.match(swipeApp, /localStorage\.removeItem/);
   assert.match(swipeApp, /privateKeyRef/);
   assert.match(swipeApp, /openSignalChat/);
   assert.doesNotMatch(swipeApp, /className="app-topbar"|className="feed-meta"|className="mainnet-live"/);

@@ -14,7 +14,7 @@ discussion.
 - Three-direction pointer, touch, and keyboard controls
 - Discover, Position, and Settings navigation
 - Live Injective Mainnet positions and unrealized PnL
-- In-memory private-key signing with no wallet connection
+- Local browser private-key signing with no wallet connection
 - Injective Mainnet derivative-market discovery, live orderbook lookup, gas
   simulation, signing, and broadcast
 - Direct broadcast on horizontal swipe, with no second confirmation
@@ -22,11 +22,11 @@ discussion.
 
 ## Private-key safety
 
-The private key is held only in the active browser tab's React memory. It is
-not sent to the AlphaSwipe server, written to local storage, or restored after
-a refresh. Direct signing removes the protection of a wallet confirmation
-screen, so use a dedicated low-balance Injective trading account rather than a
-primary wallet.
+The private key is stored in the current browser's local storage so it can be
+restored after refresh. It is not sent to the AlphaSwipe server. Direct signing
+removes the protection of a wallet confirmation screen, and a locally stored
+key can be read by anyone with access to this browser profile, so use a
+dedicated low-balance Injective trading account rather than a primary wallet.
 
 ## Run locally
 
