@@ -72,6 +72,10 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(injectiveClient, /MsgCreateDerivativeMarketOrder/);
   assert.match(injectiveClient, /MsgBroadcasterWithPk/);
   assert.match(injectiveClient, /PrivateKey\.fromHex/);
+  assert.match(injectiveClient, /DERIVATIVE_MARKET_ORDER_TYPE/);
+  assert.match(injectiveClient, /BUY:\s*1/);
+  assert.match(injectiveClient, /SELL:\s*2/);
+  assert.doesNotMatch(injectiveClient, /modules\.OrderType/);
   assert.match(injectiveClient, /fetchPositionsV2/);
   assert.match(injectiveClient, /Network\.Mainnet/);
   assert.doesNotMatch(injectiveClient, /Network\.Testnet|ChainId\.Testnet/);

@@ -33,6 +33,11 @@ export type DerivativePosition = {
   leverage: number;
 };
 
+const DERIVATIVE_MARKET_ORDER_TYPE = {
+  BUY: 1,
+  SELL: 2,
+} as const;
+
 let injectiveModulesPromise: Promise<any> | undefined;
 let marketsCache: any[] | undefined;
 
@@ -42,6 +47,12 @@ function normalizePrivateKey(value: string) {
     throw new Error("请输入 64 位十六进制 Injective 私钥。");
   }
   return normalized;
+}
+
+function getDerivativeMarketOrderType(side: OrderSide) {
+  return side === "long"
+    ? DERIVATIVE_MARKET_ORDER_TYPE.BUY
+    : DERIVATIVE_MARKET_ORDER_TYPE.SELL;
 }
 
 async function loadInjectiveModules() {
@@ -175,9 +186,8 @@ export async function placeDerivativeMarketOrder(
   input: PlaceOrderInput,
 ): Promise<PlaceOrderResult> {
   const modules = await loadInjectiveModules();
-  const privateKey = modules.PrivateKey.fromHex(
-    normalizePrivateKey(input.privateKey),
-  );
+  const normalizedPrivateKey = normalizePrivateKey(input.privateKey);
+  const privateKey = modules.PrivateKey.fromHex(normalizedPrivateKey);
   const injectiveAddress = privateKey.toBech32();
   const markets = await fetchMarkets(modules);
   const market = findMarket(markets, input.marketQuery);
@@ -238,10 +248,7 @@ export async function placeDerivativeMarketOrder(
     marketId: market.marketId,
     subaccountId,
     injectiveAddress,
-    orderType:
-      input.side === "long"
-        ? modules.OrderType.BUY
-        : modules.OrderType.SELL,
+    orderType: getDerivativeMarketOrderType(input.side),
     triggerPrice: "0",
     feeRecipient: injectiveAddress,
     price: modules.derivativePriceToChainPriceToFixed({
@@ -261,7 +268,7 @@ export async function placeDerivativeMarketOrder(
   });
 
   const broadcaster = new modules.MsgBroadcasterWithPk({
-    privateKey,
+    privateKey: normalizedPrivateKey,
     network: modules.Network.Mainnet,
     endpoints,
     simulateTx: true,
