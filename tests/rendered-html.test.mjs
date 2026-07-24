@@ -38,7 +38,7 @@ test("server-renders the AlphaSwipe product shell", async () => {
   assert.match(html, /Position/);
   assert.match(html, /Settings/);
   assert.doesNotMatch(html, /Watchlist|Activity/);
-  assert.match(html, /Injective Testnet/);
+  assert.match(html, /Injective Mainnet/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
 });
@@ -62,7 +62,9 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(newsData, /category:\s*"rwa"/);
   assert.match(injectiveClient, /MsgCreateDerivativeMarketOrder/);
   assert.match(injectiveClient, /fetchPositionsV2/);
-  assert.match(injectiveClient, /Network\.Testnet/);
+  assert.match(injectiveClient, /Network\.Mainnet/);
+  assert.doesNotMatch(injectiveClient, /Network\.Testnet|ChainId\.Testnet/);
+  assert.match(injectiveClient, /derivativePriceFromChainPriceToFixed/);
   assert.doesNotMatch(swipeApp, /className="swipe-actions"|className="gesture-hint"/);
 
   await assert.rejects(

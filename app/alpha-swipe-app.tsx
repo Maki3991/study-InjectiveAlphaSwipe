@@ -225,7 +225,7 @@ export function AlphaSwipeApp() {
     try {
       const address = await connectKeplr();
       setWalletAddress(address);
-      showToast("Keplr connected · Injective Testnet");
+      showToast("Keplr connected · Injective Mainnet");
       return address;
     } catch (error) {
       showToast(error instanceof Error ? error.message : "钱包连接失败");
@@ -516,7 +516,7 @@ export function AlphaSwipeApp() {
                               <span>
                                 <Zap /> One-tap setup
                               </span>
-                              <small>Injective Testnet</small>
+                              <small>Injective Mainnet</small>
                             </div>
                             <div className="order-controls">
                               <label>
@@ -605,7 +605,7 @@ export function AlphaSwipeApp() {
           <section className="page-view position-view">
             <header className="page-heading">
               <div>
-                <span>INJECTIVE TESTNET</span>
+                <span>INJECTIVE MAINNET</span>
                 <h1>Positions</h1>
               </div>
               {walletAddress ? (
@@ -619,7 +619,7 @@ export function AlphaSwipeApp() {
                   Refresh
                 </button>
               ) : (
-                <span className="network-chip"><i /> Testnet</span>
+                <span className="network-chip"><i /> Mainnet</span>
               )}
             </header>
 
@@ -668,7 +668,7 @@ export function AlphaSwipeApp() {
                     <div className="empty-state compact">
                       <LoaderCircle className="spin" />
                       <h2>Loading positions</h2>
-                      <p>Reading your Injective Testnet subaccounts.</p>
+                      <p>Reading your Injective Mainnet subaccounts.</p>
                     </div>
                   ) : positionsError ? (
                     <div className="empty-state compact">
@@ -746,7 +746,7 @@ export function AlphaSwipeApp() {
                       <h2>No open positions</h2>
                       <p>
                         Swipe left or right on a signal to create your first
-                        Testnet position.
+                        Mainnet position.
                       </p>
                       <button
                         type="button"
@@ -763,7 +763,7 @@ export function AlphaSwipeApp() {
                 <span><BarChart3 /></span>
                 <h2>See every position and PnL</h2>
                 <p>
-                  Connect Keplr to read live Injective Testnet positions,
+                  Connect Keplr to read live Injective Mainnet positions,
                   mark prices and unrealized profit or loss.
                 </p>
                 <button type="button" onClick={() => void connectWallet()}>
@@ -802,13 +802,12 @@ export function AlphaSwipeApp() {
                   <ShieldCheck />
                 </div>
                 <div className="network-setting">
-                  <span><i /> Injective Testnet</span>
-                  <small>injective-888</small>
+                  <span><i /> Injective Mainnet</span>
+                  <small>injective-1</small>
                 </div>
                 <p className="settings-note">
-                  Testnet is locked for this first version. Every order is
-                  simulated for gas, then requires an explicit Keplr signature
-                  before broadcast.
+                  Mainnet is active. Orders use real funds, are simulated for
+                  gas, and require an explicit Keplr signature before broadcast.
                 </p>
               </section>
               <section className="settings-card">
@@ -892,7 +891,7 @@ export function AlphaSwipeApp() {
                   {orderSide === "long" ? <TrendingUp /> : <TrendingDown />}
                 </span>
                 <div>
-                  <small>MARKET ORDER · TESTNET</small>
+                  <small>MARKET ORDER · MAINNET</small>
                   <h2>{orderSide === "long" ? "Long" : "Short"} {current.marketLabel}</h2>
                 </div>
               </div>
@@ -915,7 +914,7 @@ export function AlphaSwipeApp() {
               <p>
                 AlphaSwipe will resolve the active {current.marketQuery} perpetual
                 market, read the live orderbook, simulate gas, and ask Keplr to
-                sign one native Injective market order.
+                sign one native Injective Mainnet market order using real funds.
               </p>
             </div>
             <button
@@ -936,7 +935,7 @@ export function AlphaSwipeApp() {
                   : `Connect Keplr & open ${orderSide}`}
             </button>
             <p className="order-disclaimer">
-              Testnet only · no real funds · wallet approval required
+              Mainnet · real funds · wallet approval required
             </p>
           </section>
         </div>

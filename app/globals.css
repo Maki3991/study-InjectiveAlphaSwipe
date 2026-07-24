@@ -2054,9 +2054,10 @@ svg {
 
 .order-disclaimer {
   margin: 8px 0 0;
-  color: var(--muted);
+  color: #c73542;
   text-align: center;
   font-size: 7px;
+  font-weight: 850;
 }
 
 .toast {

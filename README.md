@@ -11,11 +11,11 @@ perpetual market order.
 - Crypto and RWA signal filters
 - Three-direction pointer, touch, and keyboard controls
 - Discover, Position, and Settings navigation
-- Live Injective Testnet positions and unrealized PnL
+- Live Injective Mainnet positions and unrealized PnL
 - Keplr wallet connection
-- Injective Testnet derivative-market discovery, live orderbook lookup, gas
+- Injective Mainnet derivative-market discovery, live orderbook lookup, gas
   simulation, signing, and broadcast
-- Testnet-only execution guardrail
+- Explicit real-funds warnings and wallet approval before Mainnet execution
 
 ## Run locally
 

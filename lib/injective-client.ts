@@ -82,9 +82,9 @@ async function getWalletStrategy() {
   const modules = await loadWalletModules();
 
   if (!walletStrategyInstance) {
-    const endpoints = modules.getNetworkEndpoints(modules.Network.Testnet);
+    const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
     const keplrStrategy = new modules.CosmosWalletStrategy({
-      chainId: modules.ChainId.Testnet,
+      chainId: modules.ChainId.Mainnet,
       wallet: modules.Wallet.Keplr,
       endpoints: {
         rest: endpoints.rest,
@@ -92,7 +92,7 @@ async function getWalletStrategy() {
       },
     });
     walletStrategyInstance = new modules.BaseWalletStrategy({
-      chainId: modules.ChainId.Testnet,
+      chainId: modules.ChainId.Mainnet,
       wallet: modules.Wallet.Keplr,
       strategies: {
         [modules.Wallet.Keplr]: keplrStrategy,
@@ -114,7 +114,7 @@ export async function connectKeplr(): Promise<string> {
   const address = addresses.find((value: string) => value?.startsWith("inj"));
 
   if (!address) {
-    throw new Error("Keplr 没有返回 Injective 地址。请确认已允许连接 Testnet。");
+    throw new Error("Keplr 没有返回 Injective 地址。请确认已允许连接 Mainnet。");
   }
 
   return address;
@@ -124,7 +124,7 @@ export async function fetchDerivativePositions(
   injectiveAddress: string,
 ): Promise<DerivativePosition[]> {
   const modules = await loadWalletModules();
-  const endpoints = modules.getNetworkEndpoints(modules.Network.Testnet);
+  const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
   const api = new modules.IndexerGrpcDerivativesApi(endpoints.indexer);
   const response = await api.fetchPositionsV2({ address: injectiveAddress });
 
@@ -164,7 +164,7 @@ export async function fetchDerivativePositions(
 async function fetchMarkets(modules: any) {
   if (marketsCache) return marketsCache;
 
-  const endpoints = modules.getNetworkEndpoints(modules.Network.Testnet);
+  const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
   const api = new modules.IndexerGrpcDerivativesApi(endpoints.indexer);
   const markets = await api.fetchMarkets({ marketStatuses: ["active"] });
   marketsCache = markets;
@@ -172,18 +172,27 @@ async function fetchMarkets(modules: any) {
 }
 
 function findMarket(markets: any[], marketQuery: string) {
-  const query = marketQuery.toUpperCase();
-  const candidates = markets.filter((market) => {
+  const query = marketQuery.trim().toUpperCase();
+  const perpetuals = markets.filter(
+    (market) => market.isPerpetual !== false,
+  );
+  const exactCandidates = perpetuals.filter((market) => {
     const ticker = String(market.ticker || "").toUpperCase();
-    return ticker.includes(query) && market.isPerpetual !== false;
+    const base = ticker.split("/")[0]?.trim();
+    return base === query;
   });
+  const candidates = exactCandidates.length
+    ? exactCandidates
+    : perpetuals.filter((market) =>
+        String(market.ticker || "").toUpperCase().includes(query),
+      );
 
   return (
     candidates.find((market) =>
-      String(market.ticker).toUpperCase().includes("USDT"),
+      String(market.ticker).toUpperCase().includes("USDC"),
     ) ||
     candidates.find((market) =>
-      String(market.ticker).toUpperCase().includes("USDC"),
+      String(market.ticker).toUpperCase().includes("USDT"),
     ) ||
     candidates[0]
   );
@@ -198,11 +207,11 @@ export async function placeDerivativeMarketOrder(
 
   if (!market) {
     throw new Error(
-      `Injective Testnet 暂未找到 ${input.marketQuery} 的可交易永续市场。`,
+      `Injective Mainnet 暂未找到 ${input.marketQuery} 的可交易永续市场。`,
     );
   }
 
-  const endpoints = modules.getNetworkEndpoints(modules.Network.Testnet);
+  const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
   const derivativesApi = new modules.IndexerGrpcDerivativesApi(
     endpoints.indexer,
   );
@@ -211,22 +220,33 @@ export async function placeDerivativeMarketOrder(
     input.side === "long" ? orderbook.sells?.[0] : orderbook.buys?.[0];
 
   if (!bestLevel?.price) {
-    throw new Error(`${market.ticker} 当前没有足够的 Testnet 订单簿流动性。`);
+    throw new Error(`${market.ticker} 当前没有足够的 Mainnet 订单簿流动性。`);
   }
 
-  const referencePrice = Number(bestLevel.price);
-  const protectedPrice =
-    input.side === "long"
-      ? referencePrice * 1.005
-      : referencePrice * 0.995;
-  const rawQuantity = input.notional / protectedPrice;
-  const rawMargin = input.notional / input.leverage;
   const quoteDecimals = Number(market.quoteToken?.decimals ?? 6);
   const multipliers = modules.getDerivativeMarketTensMultiplier({
     quoteDecimals,
     minPriceTickSize: market.minPriceTickSize,
     minQuantityTickSize: market.minQuantityTickSize,
   });
+  const referencePrice = Number(
+    modules.derivativePriceFromChainPriceToFixed({
+      value: bestLevel.price,
+      tensMultiplier: multipliers.priceTensMultiplier,
+      quoteDecimals,
+    }),
+  );
+
+  if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
+    throw new Error(`${market.ticker} 当前订单簿价格无效，请稍后重试。`);
+  }
+
+  const protectedPrice =
+    input.side === "long"
+      ? referencePrice * 1.005
+      : referencePrice * 0.995;
+  const rawQuantity = input.notional / protectedPrice;
+  const rawMargin = input.notional / input.leverage;
   const allowedPrice = modules.formatPriceToAllowablePrice(
     protectedPrice,
     multipliers.priceTensMultiplier,
@@ -265,7 +285,7 @@ export async function placeDerivativeMarketOrder(
 
   const broadcaster = new modules.MsgBroadcaster({
     walletStrategy,
-    network: modules.Network.Testnet,
+    network: modules.Network.Mainnet,
     endpoints,
     simulateTx: true,
     gasBufferCoefficient: 1.1,
