@@ -9,7 +9,7 @@ perpetual market order.
 
 - Mobile-first card stack adapted from PaperSwipe
 - Crypto and RWA signal filters
-- Three-direction pointer, touch, button, and keyboard controls
+- Three-direction pointer, touch, and keyboard controls
 - Discover, Position, and Settings navigation
 - Live Injective Testnet positions and unrealized PnL
 - Keplr wallet connection

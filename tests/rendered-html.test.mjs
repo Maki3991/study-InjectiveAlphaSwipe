@@ -44,13 +44,14 @@ test("server-renders the AlphaSwipe product shell", async () => {
 });
 
 test("starter preview is removed and product assets are wired", async () => {
-  const [page, layout, packageJson, newsData, injectiveClient] =
+  const [page, layout, packageJson, newsData, injectiveClient, swipeApp] =
     await Promise.all([
       readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
       readFile(new URL("../package.json", import.meta.url), "utf8"),
       readFile(new URL("../app/news-data.ts", import.meta.url), "utf8"),
       readFile(new URL("../lib/injective-client.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/alpha-swipe-app.tsx", import.meta.url), "utf8"),
     ]);
 
   assert.match(page, /<AlphaSwipeApp \/>/);
@@ -62,6 +63,7 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(injectiveClient, /MsgCreateDerivativeMarketOrder/);
   assert.match(injectiveClient, /fetchPositionsV2/);
   assert.match(injectiveClient, /Network\.Testnet/);
+  assert.doesNotMatch(swipeApp, /className="swipe-actions"|className="gesture-hint"/);
 
   await assert.rejects(
     access(new URL("../app/_sites-preview", import.meta.url)),

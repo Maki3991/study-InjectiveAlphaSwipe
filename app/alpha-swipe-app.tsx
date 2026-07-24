@@ -2,9 +2,6 @@
 
 import {
   ArrowDownRight,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
   ArrowUpRight,
   BarChart3,
   Check,
@@ -600,60 +597,6 @@ export function AlphaSwipeApp() {
                 )}
               </div>
 
-              <div className="deck-progress">
-                <span>
-                  {current ? Math.min(index + 1, filteredNews.length) : filteredNews.length}
-                  <small> / {filteredNews.length}</small>
-                </span>
-                <div>
-                  <i
-                    style={{
-                      width: `${
-                        filteredNews.length
-                          ? (Math.min(index + 1, filteredNews.length) /
-                              filteredNews.length) *
-                            100
-                          : 0
-                      }%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="swipe-actions">
-              <button
-                className="long-action"
-                type="button"
-                onClick={() => decide("long")}
-                aria-label="Open long setup"
-              >
-                <TrendingUp />
-                <span>Long</span>
-              </button>
-              <button
-                className="skip-action"
-                type="button"
-                onClick={() => decide("skip")}
-                aria-label="Skip signal"
-              >
-                <ArrowUp />
-                <span>Skip</span>
-              </button>
-              <button
-                className="short-action"
-                type="button"
-                onClick={() => decide("short")}
-                aria-label="Open short setup"
-              >
-                <TrendingDown />
-                <span>Short</span>
-              </button>
-            </div>
-            <div className="gesture-hint">
-              <span><ArrowLeft /> Long</span>
-              <span><ArrowUp /> Skip</span>
-              <span><ArrowRight /> Short</span>
             </div>
           </section>
         )}
