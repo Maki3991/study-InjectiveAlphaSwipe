@@ -55,6 +55,35 @@ function getDerivativeMarketOrderType(side: OrderSide) {
     : DERIVATIVE_MARKET_ORDER_TYPE.SELL;
 }
 
+function getBestOrderbookLevel(orderbook: any, side: OrderSide) {
+  const levels = side === "long" ? orderbook.sells : orderbook.buys;
+  return Array.isArray(levels)
+    ? levels.find(
+        (level) => Number(level?.price) > 0 && Number(level?.quantity) > 0,
+      )
+    : undefined;
+}
+
+function getErrorText(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return String(error || "");
+}
+
+function normalizeInjectiveOrderError(error: unknown) {
+  const message = getErrorText(error);
+  if (/account .* not found/i.test(message)) {
+    return "账户未激活或余额不足：请先给这个 Injective 地址充值可用资金。";
+  }
+  if (
+    /insufficient funds|insufficient balance|spendable balance|insufficient fee/i.test(
+      message,
+    )
+  ) {
+    return "余额不足：可用余额不足以支付保证金或 gas。";
+  }
+  return message || "Injective 拒绝了这笔订单。";
+}
+
 async function loadInjectiveModules() {
   if (!injectiveModulesPromise) {
     injectiveModulesPromise = (async () => {
@@ -155,7 +184,22 @@ async function fetchMarkets(modules: any) {
   return markets;
 }
 
-function findMarket(markets: any[], marketQuery: string) {
+function quotePriority(market: any) {
+  const ticker = String(market.ticker || "").toUpperCase();
+  if (ticker.includes("USDC")) return 0;
+  if (ticker.includes("USDT")) return 1;
+  return 2;
+}
+
+function sortMarketCandidates(markets: any[]) {
+  return [...markets].sort((left, right) => {
+    const quoteDiff = quotePriority(left) - quotePriority(right);
+    if (quoteDiff !== 0) return quoteDiff;
+    return String(left.ticker || "").localeCompare(String(right.ticker || ""));
+  });
+}
+
+function findMarketCandidates(markets: any[], marketQuery: string) {
   const query = marketQuery.trim().toUpperCase();
   const perpetuals = markets.filter(
     (market) => market.isPerpetual !== false,
@@ -171,14 +215,34 @@ function findMarket(markets: any[], marketQuery: string) {
         String(market.ticker || "").toUpperCase().includes(query),
       );
 
-  return (
-    candidates.find((market) =>
-      String(market.ticker).toUpperCase().includes("USDC"),
-    ) ||
-    candidates.find((market) =>
-      String(market.ticker).toUpperCase().includes("USDT"),
-    ) ||
-    candidates[0]
+  return sortMarketCandidates(candidates);
+}
+
+async function findLiquidDerivativeMarket(
+  derivativesApi: any,
+  markets: any[],
+  marketQuery: string,
+  side: OrderSide,
+) {
+  const candidates = findMarketCandidates(markets, marketQuery);
+  if (!candidates.length) {
+    throw new Error(
+      `Injective Mainnet 暂未找到 ${marketQuery} 的可交易永续市场。`,
+    );
+  }
+
+  const checkedTickers: string[] = [];
+  for (const market of candidates) {
+    checkedTickers.push(String(market.ticker || "Unknown market"));
+    const orderbook = await derivativesApi.fetchOrderbookV2(market.marketId);
+    const bestLevel = getBestOrderbookLevel(orderbook, side);
+    if (bestLevel) return { bestLevel, market };
+  }
+
+  throw new Error(
+    `${marketQuery} 当前没有足够的 Mainnet 订单簿流动性。已检查：${checkedTickers.join(
+      "、",
+    )}`,
   );
 }
 
@@ -190,25 +254,16 @@ export async function placeDerivativeMarketOrder(
   const privateKey = modules.PrivateKey.fromHex(normalizedPrivateKey);
   const injectiveAddress = privateKey.toBech32();
   const markets = await fetchMarkets(modules);
-  const market = findMarket(markets, input.marketQuery);
-
-  if (!market) {
-    throw new Error(
-      `Injective Mainnet 暂未找到 ${input.marketQuery} 的可交易永续市场。`,
-    );
-  }
-
   const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
   const derivativesApi = new modules.IndexerGrpcDerivativesApi(
     endpoints.indexer,
   );
-  const orderbook = await derivativesApi.fetchOrderbookV2(market.marketId);
-  const bestLevel =
-    input.side === "long" ? orderbook.sells?.[0] : orderbook.buys?.[0];
-
-  if (!bestLevel?.price) {
-    throw new Error(`${market.ticker} 当前没有足够的 Mainnet 订单簿流动性。`);
-  }
+  const { bestLevel, market } = await findLiquidDerivativeMarket(
+    derivativesApi,
+    markets,
+    input.marketQuery,
+    input.side,
+  );
 
   const quoteDecimals = Number(market.quoteToken?.decimals ?? 6);
   const multipliers = modules.getDerivativeMarketTensMultiplier({
@@ -274,10 +329,15 @@ export async function placeDerivativeMarketOrder(
     simulateTx: true,
     gasBufferCoefficient: 1.1,
   });
-  const response = await broadcaster.broadcast({ msgs: msg });
+  let response;
+  try {
+    response = await broadcaster.broadcast({ msgs: msg });
+  } catch (error) {
+    throw new Error(normalizeInjectiveOrderError(error));
+  }
 
   if (response.code !== 0) {
-    throw new Error(response.rawLog || "Injective 拒绝了这笔订单。");
+    throw new Error(normalizeInjectiveOrderError(response.rawLog));
   }
 
   return {
