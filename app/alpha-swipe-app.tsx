@@ -6,9 +6,8 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowUpRight,
-  Bookmark,
+  BarChart3,
   Check,
-  ChevronDown,
   CircleUserRound,
   Compass,
   ExternalLink,
@@ -16,11 +15,11 @@ import {
   Layers3,
   ListFilter,
   LoaderCircle,
+  RefreshCw,
   Search,
   Settings,
   ShieldCheck,
   Sparkles,
-  Star,
   TrendingDown,
   TrendingUp,
   WalletCards,
@@ -28,16 +27,18 @@ import {
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NEWS_ITEMS, type NewsCategory, type NewsItem } from "./news-data";
+import { NEWS_ITEMS, type NewsCategory } from "./news-data";
 import {
   connectKeplr,
+  fetchDerivativePositions,
   placeDerivativeMarketOrder,
+  type DerivativePosition,
   type OrderSide,
 } from "@/lib/injective-client";
 
-type ActiveTab = "discover" | "watchlist" | "portfolio" | "settings";
+type ActiveTab = "discover" | "position" | "settings";
 type FeedFilter = "all" | NewsCategory;
-type Decision = "skip" | "watch" | OrderSide;
+type Decision = "skip" | OrderSide;
 
 type TradeRecord = {
   id: string;
@@ -49,7 +50,6 @@ type TradeRecord = {
   createdAt: string;
 };
 
-const WATCHLIST_STORAGE_KEY = "alphaswipe-watchlist-v1";
 const TRADES_STORAGE_KEY = "alphaswipe-trades-v1";
 
 const filters: { id: FeedFilter; label: string }[] = [
@@ -65,7 +65,6 @@ function shortAddress(address: string) {
 function actionLabel(action: Decision) {
   return {
     skip: "Skipped",
-    watch: "Added to watchlist",
     long: "Long setup ready",
     short: "Short setup ready",
   }[action];
@@ -78,8 +77,10 @@ export function AlphaSwipeApp() {
   const [flipped, setFlipped] = useState(false);
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [exitAction, setExitAction] = useState<Decision | null>(null);
-  const [watchlist, setWatchlist] = useState<string[]>([]);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
+  const [positions, setPositions] = useState<DerivativePosition[]>([]);
+  const [positionsBusy, setPositionsBusy] = useState(false);
+  const [positionsError, setPositionsError] = useState("");
   const [orderSide, setOrderSide] = useState<OrderSide | null>(null);
   const [notional, setNotional] = useState(100);
   const [leverage, setLeverage] = useState(3);
@@ -103,7 +104,18 @@ export function AlphaSwipeApp() {
     [filter],
   );
   const current = filteredNews[index] ?? null;
-  const watchedItems = NEWS_ITEMS.filter((item) => watchlist.includes(item.id));
+  const totalUnrealizedPnl = positions.reduce(
+    (sum, position) => sum + position.unrealizedPnl,
+    0,
+  );
+  const totalMargin = positions.reduce(
+    (sum, position) => sum + position.margin,
+    0,
+  );
+  const totalPositionValue = positions.reduce(
+    (sum, position) => sum + position.quantity * position.markPrice,
+    0,
+  );
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -112,19 +124,11 @@ export function AlphaSwipeApp() {
 
   useEffect(() => {
     try {
-      setWatchlist(
-        JSON.parse(localStorage.getItem(WATCHLIST_STORAGE_KEY) || "[]"),
-      );
       setTrades(JSON.parse(localStorage.getItem(TRADES_STORAGE_KEY) || "[]"));
     } catch {
-      setWatchlist([]);
       setTrades([]);
     }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
-  }, [watchlist]);
 
   useEffect(() => {
     localStorage.setItem(TRADES_STORAGE_KEY, JSON.stringify(trades));
@@ -138,11 +142,6 @@ export function AlphaSwipeApp() {
   const advance = useCallback(
     (action: Decision) => {
       if (!current || exitAction) return;
-      if (action === "watch") {
-        setWatchlist((items) =>
-          items.includes(current.id) ? items : [...items, current.id],
-        );
-      }
       setExitAction(action);
       showToast(actionLabel(action));
       window.setTimeout(() => {
@@ -181,10 +180,9 @@ export function AlphaSwipeApp() {
         return;
       }
       const keyMap: Record<string, Decision> = {
-        ArrowLeft: "skip",
-        ArrowRight: "long",
-        ArrowUp: "watch",
-        ArrowDown: "short",
+        ArrowLeft: "long",
+        ArrowRight: "short",
+        ArrowUp: "skip",
       };
       if (keyMap[event.key]) {
         event.preventDefault();
@@ -198,6 +196,31 @@ export function AlphaSwipeApp() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeTab, decide, orderSide]);
+
+  const refreshPositions = useCallback(
+    async (address = walletAddress) => {
+      if (!address) return;
+      setPositionsBusy(true);
+      setPositionsError("");
+      try {
+        setPositions(await fetchDerivativePositions(address));
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "持仓读取失败";
+        setPositionsError(message);
+        showToast(message);
+      } finally {
+        setPositionsBusy(false);
+      }
+    },
+    [showToast, walletAddress],
+  );
+
+  useEffect(() => {
+    if (activeTab === "position" && walletAddress) {
+      void refreshPositions(walletAddress);
+    }
+  }, [activeTab, refreshPositions, walletAddress]);
 
   const connectWallet = async () => {
     if (walletAddress) return walletAddress;
@@ -240,25 +263,12 @@ export function AlphaSwipeApp() {
       setOrderSide(null);
       showToast(`Order broadcast · ${result.txHash.slice(0, 10)}…`);
       advance(orderSide);
+      void refreshPositions(address);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "订单提交失败");
     } finally {
       setTradeBusy(false);
     }
-  };
-
-  const removeWatch = (id: string) => {
-    setWatchlist((items) => items.filter((item) => item !== id));
-    showToast("Removed from watchlist");
-  };
-
-  const selectWatchItem = (item: NewsItem) => {
-    const nextFilter: FeedFilter = "all";
-    const nextIndex = NEWS_ITEMS.findIndex((candidate) => candidate.id === item.id);
-    setFilter(nextFilter);
-    setIndex(nextIndex);
-    setActiveTab("discover");
-    setFlipped(false);
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -291,12 +301,12 @@ export function AlphaSwipeApp() {
       return;
     }
     if (Math.abs(drag.x) > 88 && Math.abs(drag.x) > Math.abs(drag.y)) {
-      decide(drag.x > 0 ? "long" : "skip");
+      decide(drag.x < 0 ? "long" : "short");
     } else if (
-      Math.abs(drag.y) > 76 &&
+      drag.y < -76 &&
       Math.abs(drag.y) > Math.abs(drag.x) * 0.75
     ) {
-      decide(drag.y < 0 ? "watch" : "short");
+      decide("skip");
     }
     setDrag({ x: 0, y: 0 });
     try {
@@ -404,28 +414,22 @@ export function AlphaSwipeApp() {
                     onPointerCancel={onPointerUp}
                   >
                     <div
-                      className="swipe-stamp stamp-skip"
-                      style={{ opacity: Math.max(0, -drag.x / 90) }}
-                    >
-                      SKIP
-                    </div>
-                    <div
                       className="swipe-stamp stamp-long"
-                      style={{ opacity: Math.max(0, drag.x / 90) }}
+                      style={{ opacity: Math.max(0, -drag.x / 90) }}
                     >
                       LONG
                     </div>
                     <div
-                      className="swipe-stamp stamp-watch"
-                      style={{ opacity: Math.max(0, -drag.y / 80) }}
-                    >
-                      WATCH
-                    </div>
-                    <div
                       className="swipe-stamp stamp-short"
-                      style={{ opacity: Math.max(0, drag.y / 80) }}
+                      style={{ opacity: Math.max(0, drag.x / 90) }}
                     >
                       SHORT
+                    </div>
+                    <div
+                      className="swipe-stamp stamp-skip"
+                      style={{ opacity: Math.max(0, -drag.y / 80) }}
+                    >
+                      SKIP
                     </div>
                     <div className="card-inner">
                       <div className="card-face card-front">
@@ -580,8 +584,8 @@ export function AlphaSwipeApp() {
                     <span><Check /></span>
                     <h1>Signal deck cleared</h1>
                     <p>
-                      You reviewed every story in this feed. Open your watchlist
-                      or restart the deck.
+                      You reviewed every story in this feed. Restart the deck
+                      whenever you want another pass.
                     </p>
                     <button
                       type="button"
@@ -619,22 +623,22 @@ export function AlphaSwipeApp() {
 
             <div className="swipe-actions">
               <button
+                className="long-action"
+                type="button"
+                onClick={() => decide("long")}
+                aria-label="Open long setup"
+              >
+                <TrendingUp />
+                <span>Long</span>
+              </button>
+              <button
                 className="skip-action"
                 type="button"
                 onClick={() => decide("skip")}
                 aria-label="Skip signal"
               >
-                <X />
+                <ArrowUp />
                 <span>Skip</span>
-              </button>
-              <button
-                className="watch-action"
-                type="button"
-                onClick={() => decide("watch")}
-                aria-label="Watch signal"
-              >
-                <Star />
-                <span>Watch</span>
               </button>
               <button
                 className="short-action"
@@ -645,151 +649,187 @@ export function AlphaSwipeApp() {
                 <TrendingDown />
                 <span>Short</span>
               </button>
-              <button
-                className="long-action"
-                type="button"
-                onClick={() => decide("long")}
-                aria-label="Open long setup"
-              >
-                <TrendingUp />
-                <span>Long</span>
-              </button>
             </div>
             <div className="gesture-hint">
-              <span><ArrowLeft /> Skip</span>
-              <span><ArrowUp /> Watch</span>
-              <span><ChevronDown /> Short</span>
-              <span><ArrowRight /> Long</span>
+              <span><ArrowLeft /> Long</span>
+              <span><ArrowUp /> Skip</span>
+              <span><ArrowRight /> Short</span>
             </div>
           </section>
         )}
 
-        {activeTab === "watchlist" && (
-          <section className="page-view">
-            <header className="page-heading">
-              <div>
-                <span>YOUR SIGNAL QUEUE</span>
-                <h1>Watchlist</h1>
-              </div>
-              <strong>{watchedItems.length}</strong>
-            </header>
-            <div className="insight-banner">
-              <Sparkles />
-              <div>
-                <strong>
-                  {watchedItems.length
-                    ? `${watchedItems.length} catalysts worth tracking`
-                    : "Your watchlist is clear"}
-                </strong>
-                <span>
-                  Signals stay on this device until you remove them.
-                </span>
-              </div>
-            </div>
-            <div className="list-scroll">
-              {watchedItems.length ? (
-                watchedItems.map((item) => (
-                  <article className="watch-item" key={item.id}>
-                    <button
-                      className={`watch-visual theme-${item.theme}`}
-                      type="button"
-                      onClick={() => selectWatchItem(item)}
-                    >
-                      {item.marketQuery.slice(0, 2)}
-                    </button>
-                    <button
-                      className="watch-copy"
-                      type="button"
-                      onClick={() => selectWatchItem(item)}
-                    >
-                      <span>{item.source} · {item.published}</span>
-                      <h2>{item.title}</h2>
-                      <small>{item.marketLabel} · {item.horizon}</small>
-                    </button>
-                    <button
-                      className="remove-button"
-                      type="button"
-                      onClick={() => removeWatch(item.id)}
-                      aria-label={`Remove ${item.title}`}
-                    >
-                      <X />
-                    </button>
-                  </article>
-                ))
-              ) : (
-                <div className="empty-state">
-                  <Bookmark />
-                  <h2>Nothing saved yet</h2>
-                  <p>Swipe up on a signal to keep it on your radar.</p>
-                  <button type="button" onClick={() => setActiveTab("discover")}>
-                    Explore signals
-                  </button>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
-
-        {activeTab === "portfolio" && (
-          <section className="page-view">
+        {activeTab === "position" && (
+          <section className="page-view position-view">
             <header className="page-heading">
               <div>
                 <span>INJECTIVE TESTNET</span>
-                <h1>Activity</h1>
+                <h1>Positions</h1>
               </div>
-              <span className="network-chip"><i /> Connected</span>
-            </header>
-            <div className="portfolio-card">
-              <div>
-                <small>Trading account</small>
-                <strong>
-                  {walletAddress ? shortAddress(walletAddress) : "Not connected"}
-                </strong>
-              </div>
-              <button type="button" onClick={() => void connectWallet()}>
-                <WalletCards />
-                {walletAddress ? "Wallet ready" : "Connect Keplr"}
-              </button>
-              <div className="portfolio-stats">
-                <span><strong>{trades.length}</strong>orders</span>
-                <span><strong>${trades.reduce((sum, trade) => sum + trade.notional, 0)}</strong>notional</span>
-                <span><strong>{watchlist.length}</strong>watched</span>
-              </div>
-            </div>
-            <div className="section-title">
-              <span>Recent broadcasts</span>
-              <small>Local activity log</small>
-            </div>
-            <div className="list-scroll activity-list">
-              {trades.length ? (
-                trades.map((trade) => (
-                  <article className="trade-item" key={trade.id}>
-                    <span className={trade.side}>
-                      {trade.side === "long" ? <TrendingUp /> : <TrendingDown />}
-                    </span>
-                    <div>
-                      <strong>{trade.market}</strong>
-                      <small>
-                        ${trade.notional} · {trade.leverage}× · {trade.side}
-                      </small>
-                    </div>
-                    <a
-                      href={`https://testnet.explorer.injective.network/transaction/${trade.txHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink />
-                    </a>
-                  </article>
-                ))
+              {walletAddress ? (
+                <button
+                  className="refresh-positions"
+                  type="button"
+                  onClick={() => void refreshPositions()}
+                  disabled={positionsBusy}
+                >
+                  <RefreshCw className={positionsBusy ? "spin" : ""} />
+                  Refresh
+                </button>
               ) : (
-                <div className="empty-state compact">
-                  <Zap />
-                  <h2>No orders yet</h2>
-                  <p>Your signed Testnet broadcasts will appear here.</p>
-                </div>
+                <span className="network-chip"><i /> Testnet</span>
               )}
-            </div>
+            </header>
+
+            {walletAddress ? (
+              <>
+                <div className="position-summary-card">
+                  <div className="position-account">
+                    <span>
+                      <i />
+                      {shortAddress(walletAddress)}
+                    </span>
+                    <small>Live indexer data</small>
+                  </div>
+                  <div className="pnl-hero">
+                    <small>Total unrealized PnL</small>
+                    <strong
+                      className={
+                        totalUnrealizedPnl >= 0 ? "is-profit" : "is-loss"
+                      }
+                    >
+                      {totalUnrealizedPnl >= 0 ? "+" : "-"}$
+                      {Math.abs(totalUnrealizedPnl).toFixed(2)}
+                    </strong>
+                  </div>
+                  <div className="position-summary-stats">
+                    <span>
+                      <small>Open positions</small>
+                      <strong>{positions.length}</strong>
+                    </span>
+                    <span>
+                      <small>Position value</small>
+                      <strong>${totalPositionValue.toFixed(2)}</strong>
+                    </span>
+                    <span>
+                      <small>Margin</small>
+                      <strong>${totalMargin.toFixed(2)}</strong>
+                    </span>
+                  </div>
+                </div>
+                <div className="section-title">
+                  <span>Open positions</span>
+                  <small>Mark-to-market PnL</small>
+                </div>
+                <div className="positions-scroll">
+                  {positionsBusy && positions.length === 0 ? (
+                    <div className="empty-state compact">
+                      <LoaderCircle className="spin" />
+                      <h2>Loading positions</h2>
+                      <p>Reading your Injective Testnet subaccounts.</p>
+                    </div>
+                  ) : positionsError ? (
+                    <div className="empty-state compact">
+                      <ShieldCheck />
+                      <h2>Couldn’t load positions</h2>
+                      <p>{positionsError}</p>
+                      <button
+                        type="button"
+                        onClick={() => void refreshPositions()}
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : positions.length ? (
+                    positions.map((position) => (
+                      <article
+                        className="position-item"
+                        key={`${position.marketId}-${position.side}`}
+                      >
+                        <div className="position-item-heading">
+                          <span className={position.side}>
+                            {position.side === "long" ? (
+                              <TrendingUp />
+                            ) : (
+                              <TrendingDown />
+                            )}
+                          </span>
+                          <div>
+                            <strong>{position.ticker}</strong>
+                            <small>
+                              {position.side} · {position.leverage.toFixed(1)}×
+                            </small>
+                          </div>
+                          <div className="position-pnl">
+                            <small>Unrealized PnL</small>
+                            <strong
+                              className={
+                                position.unrealizedPnl >= 0
+                                  ? "is-profit"
+                                  : "is-loss"
+                              }
+                            >
+                              {position.unrealizedPnl >= 0 ? "+" : "-"}$
+                              {Math.abs(position.unrealizedPnl).toFixed(2)}
+                            </strong>
+                          </div>
+                        </div>
+                        <div className="position-details">
+                          <span>
+                            <small>Quantity</small>
+                            <strong>{position.quantity.toFixed(4)}</strong>
+                          </span>
+                          <span>
+                            <small>Entry</small>
+                            <strong>${position.entryPrice.toFixed(2)}</strong>
+                          </span>
+                          <span>
+                            <small>Mark</small>
+                            <strong>${position.markPrice.toFixed(2)}</strong>
+                          </span>
+                          <span>
+                            <small>Liquidation</small>
+                            <strong>
+                              {position.liquidationPrice
+                                ? `$${position.liquidationPrice.toFixed(2)}`
+                                : "—"}
+                            </strong>
+                          </span>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <div className="empty-state compact">
+                      <BarChart3 />
+                      <h2>No open positions</h2>
+                      <p>
+                        Swipe left or right on a signal to create your first
+                        Testnet position.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("discover")}
+                      >
+                        Discover signals
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="position-connect-state">
+                <span><BarChart3 /></span>
+                <h2>See every position and PnL</h2>
+                <p>
+                  Connect Keplr to read live Injective Testnet positions,
+                  mark prices and unrealized profit or loss.
+                </p>
+                <button type="button" onClick={() => void connectWallet()}>
+                  <WalletCards />
+                  Connect Keplr
+                </button>
+                <small>Read-only until you approve a trade in your wallet.</small>
+              </div>
+            )}
           </section>
         )}
 
@@ -832,7 +872,7 @@ export function AlphaSwipeApp() {
                 <div className="settings-title">
                   <div>
                     <h2>Default trade setup</h2>
-                    <p>Used whenever you swipe long or short.</p>
+                    <p>Used whenever you swipe left or right.</p>
                   </div>
                   <Settings />
                 </div>
@@ -879,19 +919,11 @@ export function AlphaSwipeApp() {
           <Compass /><span>Discover</span>
         </button>
         <button
-          className={activeTab === "watchlist" ? "is-active" : ""}
+          className={activeTab === "position" ? "is-active" : ""}
           type="button"
-          onClick={() => setActiveTab("watchlist")}
+          onClick={() => setActiveTab("position")}
         >
-          <Bookmark /><span>Watchlist</span>
-          {watchlist.length > 0 && <b>{watchlist.length}</b>}
-        </button>
-        <button
-          className={activeTab === "portfolio" ? "is-active" : ""}
-          type="button"
-          onClick={() => setActiveTab("portfolio")}
-        >
-          <Zap /><span>Activity</span>
+          <BarChart3 /><span>Position</span>
         </button>
         <button
           className={activeTab === "settings" ? "is-active" : ""}

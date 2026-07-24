@@ -17,6 +17,19 @@ type PlaceOrderResult = {
   quantity: number;
 };
 
+export type DerivativePosition = {
+  marketId: string;
+  ticker: string;
+  side: OrderSide;
+  quantity: number;
+  entryPrice: number;
+  markPrice: number;
+  margin: number;
+  liquidationPrice: number;
+  unrealizedPnl: number;
+  leverage: number;
+};
+
 let walletStrategyInstance: any;
 let walletModulesPromise: Promise<any> | undefined;
 let marketsCache: any[] | undefined;
@@ -105,6 +118,47 @@ export async function connectKeplr(): Promise<string> {
   }
 
   return address;
+}
+
+export async function fetchDerivativePositions(
+  injectiveAddress: string,
+): Promise<DerivativePosition[]> {
+  const modules = await loadWalletModules();
+  const endpoints = modules.getNetworkEndpoints(modules.Network.Testnet);
+  const api = new modules.IndexerGrpcDerivativesApi(endpoints.indexer);
+  const response = await api.fetchPositionsV2({ address: injectiveAddress });
+
+  return response.positions
+    .map((position: any) => {
+      const direction = String(position.direction || "").toLowerCase();
+      const side: OrderSide =
+        direction === "buy" || direction === "long" ? "long" : "short";
+      const quantity = Math.abs(Number(position.quantity || 0));
+      const entryPrice = Number(position.entryPrice || 0);
+      const markPrice = Number(position.markPrice || 0);
+      const margin = Number(position.margin || 0);
+      const reportedPnl = Number(position.upnl);
+      const calculatedPnl =
+        (side === "long" ? markPrice - entryPrice : entryPrice - markPrice) *
+        quantity;
+
+      return {
+        marketId: String(position.marketId || ""),
+        ticker: String(position.ticker || "Unknown market"),
+        side,
+        quantity,
+        entryPrice,
+        markPrice,
+        margin,
+        liquidationPrice: Number(position.liquidationPrice || 0),
+        unrealizedPnl: Number.isFinite(reportedPnl)
+          ? reportedPnl
+          : calculatedPnl,
+        leverage:
+          margin > 0 ? Math.max(1, (entryPrice * quantity) / margin) : 1,
+      };
+    })
+    .filter((position: DerivativePosition) => position.quantity > 0);
 }
 
 async function fetchMarkets(modules: any) {

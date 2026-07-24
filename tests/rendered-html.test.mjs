@@ -35,7 +35,9 @@ test("server-renders the AlphaSwipe product shell", async () => {
   assert.match(html, /Curated market signals/);
   assert.match(html, /AlphaSwipe/);
   assert.match(html, /Discover/);
-  assert.match(html, /Watchlist/);
+  assert.match(html, /Position/);
+  assert.match(html, /Settings/);
+  assert.doesNotMatch(html, /Watchlist|Activity/);
   assert.match(html, /Injective Testnet/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
@@ -58,6 +60,7 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(newsData, /category:\s*"crypto"/);
   assert.match(newsData, /category:\s*"rwa"/);
   assert.match(injectiveClient, /MsgCreateDerivativeMarketOrder/);
+  assert.match(injectiveClient, /fetchPositionsV2/);
   assert.match(injectiveClient, /Network\.Testnet/);
 
   await assert.rejects(

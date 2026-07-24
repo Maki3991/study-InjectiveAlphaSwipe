@@ -1,16 +1,17 @@
 # AlphaSwipe
 
 AlphaSwipe turns crypto and real-world-asset news into a swipeable decision
-feed. Swipe to skip, watch, go long, or go short; flip a card to review the
-thesis, adjust notional and leverage, and submit a native Injective perpetual
-market order.
+feed. Swipe left to go long, right to go short, or up to skip; flip a card to
+review the thesis, adjust notional and leverage, and submit a native Injective
+perpetual market order.
 
 ## First-version scope
 
 - Mobile-first card stack adapted from PaperSwipe
 - Crypto and RWA signal filters
-- Four-direction pointer, touch, button, and keyboard controls
-- Local watchlist and transaction activity
+- Three-direction pointer, touch, button, and keyboard controls
+- Discover, Position, and Settings navigation
+- Live Injective Testnet positions and unrealized PnL
 - Keplr wallet connection
 - Injective Testnet derivative-market discovery, live orderbook lookup, gas
   simulation, signing, and broadcast
