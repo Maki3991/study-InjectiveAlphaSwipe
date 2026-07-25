@@ -114,6 +114,10 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /localStorage\.setItem/);
   assert.match(swipeApp, /localStorage\.removeItem/);
   assert.match(swipeApp, /privateKeyRef/);
+  assert.match(
+    swipeApp,
+    /type="range"\s+min="1"\s+max="500"\s+step="1"\s+value=\{notional\}/,
+  );
   assert.match(swipeApp, /openSignalChat/);
   assert.match(swipeApp, /fetch\("\/api\/ai"/);
   assert.match(swipeApp, /fetch\("\/api\/signals\?schema=research-v2"/);

@@ -1091,9 +1091,9 @@ export function AlphaSwipeApp() {
                   <span>Notional <strong>${notional}</strong></span>
                   <input
                     type="range"
-                    min="25"
+                    min="1"
                     max="500"
-                    step="25"
+                    step="1"
                     value={notional}
                     onChange={(event) => setNotional(Number(event.target.value))}
                   />
