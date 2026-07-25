@@ -1099,22 +1099,27 @@ svg {
 .swipe-stamp {
   position: absolute;
   z-index: 20;
-  min-width: 86px;
-  padding: 6px 11px;
-  border: 3px solid currentColor;
-  border-radius: 7px;
+  min-width: 106px;
+  padding: 9px 13px;
+  border: 2px solid currentColor;
+  border-radius: 11px;
   display: grid;
-  gap: 3px;
+  gap: 5px;
   line-height: 1;
   text-align: center;
-  font-size: 17px;
+  background: rgba(12, 16, 24, 0.76);
+  box-shadow: 0 8px 22px rgba(8, 11, 18, 0.2);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
   font-weight: 950;
-  letter-spacing: 1px;
+  letter-spacing: 0.9px;
   pointer-events: none;
 }
 
-.swipe-stamp small {
-  font-size: 9px;
+.swipe-amount {
+  color: #fff;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
 
@@ -1126,17 +1131,17 @@ svg {
 }
 
 .stamp-long {
-  right: 22px;
-  top: 50%;
+  right: 20px;
+  top: 102px;
   color: #62e2b6;
-  transform: rotate(-9deg);
+  transform: rotate(-4deg);
 }
 
 .stamp-short {
-  left: 22px;
-  top: 50%;
+  left: 20px;
+  top: 102px;
   color: #ff8f95;
-  transform: rotate(9deg);
+  transform: rotate(4deg);
 }
 
 .deck-complete {

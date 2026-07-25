@@ -120,6 +120,7 @@ test("starter preview is removed and product assets are wired", async () => {
   );
   assert.match(swipeApp, /function getSwipeNotional/);
   assert.match(swipeApp, /FULL_SIZE_SWIPE_PX\s*=\s*220/);
+  assert.match(swipeApp, /className="swipe-amount"/);
   assert.match(swipeApp, /Max notional/);
   assert.match(swipeApp, /closeDerivativePosition/);
   assert.match(swipeApp, /Close position/);

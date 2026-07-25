@@ -780,14 +780,18 @@ export function AlphaSwipeApp() {
                       style={{ opacity: Math.max(0, -drag.x / 90) }}
                     >
                       <span>LONG</span>
-                      <small>${formatNotional(swipeNotional)}</small>
+                      <strong className="swipe-amount">
+                        ${formatNotional(swipeNotional)}
+                      </strong>
                     </div>
                     <div
                       className="swipe-stamp stamp-short"
                       style={{ opacity: Math.max(0, drag.x / 90) }}
                     >
                       <span>SHORT</span>
-                      <small>${formatNotional(swipeNotional)}</small>
+                      <strong className="swipe-amount">
+                        ${formatNotional(swipeNotional)}
+                      </strong>
                     </div>
                     <div
                       className="swipe-stamp stamp-skip"
