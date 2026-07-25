@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import { derivativeMarginFromChainMarginToFixed } from "@injectivelabs/sdk-ts/utils";
 
 const templateRoot = new URL("../", import.meta.url);
 
@@ -46,6 +47,16 @@ test("server-renders the AlphaSwipe product shell", async () => {
   assert.doesNotMatch(html, /Connect Keplr|Connect wallet/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
+});
+
+test("normalizes derivative minimum notional from quote-chain units", () => {
+  assert.equal(
+    derivativeMarginFromChainMarginToFixed({
+      value: "1000000",
+      quoteDecimals: 6,
+    }),
+    "1",
+  );
 });
 
 test("starter preview is removed and product assets are wired", async () => {
@@ -133,6 +144,10 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /Confirm close/);
   assert.match(injectiveClient, /BigNumber\.ROUND_FLOOR/);
   assert.match(injectiveClient, /actualNotional\.gt\(cap\)/);
+  assert.match(
+    injectiveClient,
+    /derivativeMarginFromChainMarginToFixed\(\{\s*value:\s*String\(market\.minNotional/,
+  );
   assert.match(injectiveClient, /export async function closeDerivativePosition/);
   assert.match(
     injectiveClient,

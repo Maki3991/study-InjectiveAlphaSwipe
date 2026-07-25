@@ -344,6 +344,7 @@ function getEntryOrderSize(
   allowedPrice: string,
   requestedNotional: number,
   maxNotional: number,
+  quoteDecimals: number,
   quantityTensMultiplier: number,
 ) {
   const BigNumber = modules.BigNumber;
@@ -351,7 +352,12 @@ function getEntryOrderSize(
   const tick = new BigNumber(market.minQuantityTickSize || 0);
   const requested = new BigNumber(Math.max(1, requestedNotional));
   const cap = new BigNumber(Math.max(1, maxNotional));
-  const marketMinimum = new BigNumber(Math.max(0, Number(market.minNotional || 0)));
+  const marketMinimum = new BigNumber(
+    modules.derivativeMarginFromChainMarginToFixed({
+      value: String(market.minNotional || "0"),
+      quoteDecimals,
+    }),
+  );
 
   if (!price.isFinite() || price.lte(0) || !tick.isFinite() || tick.lte(0)) {
     throw new Error(`${market.ticker} 当前交易步进无效，请稍后重试。`);
@@ -450,6 +456,7 @@ export async function placeDerivativeMarketOrder(
     allowedPrice,
     input.notional,
     input.maxNotional,
+    quoteDecimals,
     multipliers.quantityTensMultiplier,
   );
   const rawMargin = actualNotional / input.leverage;
