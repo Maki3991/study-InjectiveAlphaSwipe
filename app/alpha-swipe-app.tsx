@@ -100,6 +100,16 @@ function formatPositionPrice(value: number) {
   });
 }
 
+function formatPositionUpdateTime(timestamp: number) {
+  if (!timestamp) return "updating…";
+  return new Date(timestamp).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
 function getPositionKey(position: DerivativePosition) {
   return `${position.subaccountId}-${position.marketId}-${position.side}`;
 }
@@ -311,6 +321,7 @@ export function AlphaSwipeApp() {
   const [positions, setPositions] = useState<DerivativePosition[]>([]);
   const [positionsBusy, setPositionsBusy] = useState(false);
   const [positionsError, setPositionsError] = useState("");
+  const [positionsUpdatedAt, setPositionsUpdatedAt] = useState(0);
   const [maxNotional, setMaxNotional] = useState(100);
   const [leverage, setLeverage] = useState(3);
   const [privateKeyDraft, setPrivateKeyDraft] = useState("");
@@ -428,7 +439,9 @@ export function AlphaSwipeApp() {
       setPositionsBusy(true);
       setPositionsError("");
       try {
-        setPositions(await fetchDerivativePositions(address));
+        const nextPositions = await fetchDerivativePositions(address);
+        setPositions(nextPositions);
+        setPositionsUpdatedAt(Date.now());
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "持仓读取失败";
@@ -705,6 +718,7 @@ export function AlphaSwipeApp() {
       setShowPrivateKey(false);
       setPositions([]);
       setPositionsError("");
+      setPositionsUpdatedAt(0);
       showToast(
         stored
           ? `Local key saved · ${shortAddress(address)}`
@@ -724,6 +738,7 @@ export function AlphaSwipeApp() {
     setSignerAddress("");
     setPositions([]);
     setPositionsError("");
+    setPositionsUpdatedAt(0);
     setCloseConfirmKey("");
     setClosingPositionKey("");
     showToast("Local key cleared");
@@ -974,7 +989,9 @@ export function AlphaSwipeApp() {
                 </div>
                 <div className="section-title">
                   <span>Open positions</span>
-                  <small>Live PnL · refreshes every 10s</small>
+                  <small>
+                    Auto 10s · {formatPositionUpdateTime(positionsUpdatedAt)}
+                  </small>
                 </div>
                 <div className="positions-scroll">
                   {positionsBusy && positions.length === 0 ? (

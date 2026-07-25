@@ -201,6 +201,11 @@ export async function fetchDerivativePositions(
       const calculatedPnl =
         (side === "long" ? markPrice - entryPrice : entryPrice - markPrice) *
         quantity;
+      const unrealizedPnl =
+        Number.isFinite(reportedPnl) &&
+        (reportedPnl !== 0 || calculatedPnl === 0)
+          ? reportedPnl
+          : calculatedPnl;
 
       return {
         marketId: String(position.marketId || ""),
@@ -215,9 +220,7 @@ export async function fetchDerivativePositions(
         markPrice,
         margin,
         liquidationPrice: fromChainPrice(position.liquidationPrice),
-        unrealizedPnl: Number.isFinite(reportedPnl)
-          ? reportedPnl
-          : calculatedPnl,
+        unrealizedPnl,
         leverage:
           margin > 0 ? Math.max(1, (entryPrice * quantity) / margin) : 1,
       };

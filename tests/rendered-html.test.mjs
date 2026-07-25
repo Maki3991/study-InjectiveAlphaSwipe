@@ -124,7 +124,8 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /POSITION_REFRESH_MS\s*=\s*10_000/);
   assert.match(swipeApp, /window\.setInterval/);
   assert.match(swipeApp, /positionsRequestInFlightRef/);
-  assert.match(swipeApp, /Live PnL · refreshes every 10s/);
+  assert.match(swipeApp, /Auto 10s/);
+  assert.match(swipeApp, /formatPositionUpdateTime/);
   assert.match(swipeApp, /className="swipe-amount"/);
   assert.match(swipeApp, /Max notional/);
   assert.match(swipeApp, /closeDerivativePosition/);
