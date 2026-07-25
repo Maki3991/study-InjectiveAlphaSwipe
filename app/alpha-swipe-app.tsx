@@ -139,18 +139,6 @@ function SignalBack({
 
   return (
     <div className="card-face card-back">
-      <div className="back-header">
-        <span className="source-badge">{signal.marketLabel}</span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close signal details"
-        >
-          <X />
-        </button>
-        <h2>{signal.title}</h2>
-        <p>{signal.summary}</p>
-      </div>
       <div className="back-scroll">
         <section
           className={`signal-verdict direction-${research.signal.direction}`}
@@ -170,6 +158,14 @@ function SignalBack({
               度 · {research.signal.confidence}% 置信度
             </small>
           </div>
+          <button
+            className="back-close"
+            type="button"
+            onClick={onClose}
+            aria-label="Close signal details"
+          >
+            <X />
+          </button>
           <p>{research.signal.description}</p>
         </section>
 

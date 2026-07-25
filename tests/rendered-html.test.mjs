@@ -129,6 +129,8 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /最近财报/);
   assert.match(swipeApp, /风险提示/);
   assert.doesNotMatch(swipeApp, /className="earnings-panel"|className="thesis-grid"|className="fact-row"/);
+  assert.doesNotMatch(swipeApp, /className="back-header"/);
+  assert.match(swipeApp, /className="back-close"/);
   assert.doesNotMatch(swipeApp, /buildAssistantAnswer/);
   assert.doesNotMatch(swipeApp, /className="app-topbar"|className="feed-meta"|className="mainnet-live"/);
   assert.doesNotMatch(swipeApp, /Connect Keplr|connectKeplr|order-sheet|quick-order/);
