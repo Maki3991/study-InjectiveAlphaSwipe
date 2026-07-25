@@ -116,7 +116,20 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /privateKeyRef/);
   assert.match(
     swipeApp,
-    /type="range"\s+min="1"\s+max="500"\s+step="1"\s+value=\{notional\}/,
+    /type="range"\s+min="1"\s+max="500"\s+step="1"\s+value=\{maxNotional\}/,
+  );
+  assert.match(swipeApp, /function getSwipeNotional/);
+  assert.match(swipeApp, /FULL_SIZE_SWIPE_PX\s*=\s*220/);
+  assert.match(swipeApp, /Max notional/);
+  assert.match(swipeApp, /closeDerivativePosition/);
+  assert.match(swipeApp, /Close position/);
+  assert.match(swipeApp, /Confirm close/);
+  assert.match(injectiveClient, /BigNumber\.ROUND_FLOOR/);
+  assert.match(injectiveClient, /actualNotional\.gt\(cap\)/);
+  assert.match(injectiveClient, /export async function closeDerivativePosition/);
+  assert.match(
+    injectiveClient,
+    /margin:\s*modules\.derivativeMarginToChainMarginToFixed\(\{\s*value:\s*0,/,
   );
   assert.match(swipeApp, /openSignalChat/);
   assert.match(swipeApp, /fetch\("\/api\/ai"/);

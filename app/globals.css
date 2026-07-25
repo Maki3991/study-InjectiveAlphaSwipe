@@ -1099,13 +1099,23 @@ svg {
 .swipe-stamp {
   position: absolute;
   z-index: 20;
+  min-width: 86px;
   padding: 6px 11px;
   border: 3px solid currentColor;
   border-radius: 7px;
+  display: grid;
+  gap: 3px;
+  line-height: 1;
+  text-align: center;
   font-size: 17px;
   font-weight: 950;
   letter-spacing: 1px;
   pointer-events: none;
+}
+
+.swipe-stamp small {
+  font-size: 9px;
+  letter-spacing: 0;
 }
 
 .stamp-skip {
@@ -1791,6 +1801,81 @@ svg {
   text-overflow: ellipsis;
 }
 
+.position-close-row {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.position-close-row > div {
+  min-width: 0;
+  margin-right: auto;
+  display: grid;
+  gap: 3px;
+}
+
+.position-close-row > div strong {
+  font-size: 9px;
+}
+
+.position-close-row > div small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close-position-button,
+.close-cancel,
+.close-confirm {
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 8px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.close-position-button {
+  border: 1px solid rgba(198, 55, 66, 0.2);
+  background: #fff8f8;
+  color: #ad3d46;
+}
+
+.close-cancel {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+}
+
+.close-confirm {
+  border: 1px solid #bd4b50;
+  background: #bd4b50;
+  color: #fff;
+}
+
+.close-position-button:disabled,
+.close-cancel:disabled,
+.close-confirm:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.close-position-button svg,
+.close-confirm svg {
+  width: 12px;
+  height: 12px;
+}
+
 .position-connect-state {
   min-height: calc(100% - 76px);
   padding: 55px 38px 80px;
@@ -2116,6 +2201,12 @@ svg {
   width: 100%;
   margin-top: 10px;
   accent-color: var(--accent);
+}
+
+.setting-range-hint {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 7.5px;
 }
 
 .risk-note {

@@ -9,6 +9,7 @@ type PlaceOrderInput = {
   marketQuery: string;
   side: OrderSide;
   notional: number;
+  maxNotional: number;
   leverage: number;
 };
 
@@ -17,14 +18,25 @@ type PlaceOrderResult = {
   ticker: string;
   price: number;
   quantity: number;
+  notional: number;
   injectiveAddress: string;
+};
+
+type ClosePositionInput = {
+  privateKey: string;
+  marketId: string;
+  subaccountId: string;
+  positionSide: OrderSide;
+  quantity: string;
 };
 
 export type DerivativePosition = {
   marketId: string;
+  subaccountId: string;
   ticker: string;
   side: OrderSide;
   quantity: number;
+  quantityText: string;
   entryPrice: number;
   markPrice: number;
   margin: number;
@@ -99,6 +111,7 @@ async function loadInjectiveModules() {
         sdkTx,
         sdkAccounts,
         sdkUtils,
+        baseUtils,
       ] = await Promise.all([
         import("@injectivelabs/networks"),
         import("@injectivelabs/sdk-ts/client/indexer"),
@@ -106,6 +119,7 @@ async function loadInjectiveModules() {
         import("@injectivelabs/sdk-ts/core/tx"),
         import("@injectivelabs/sdk-ts/core/accounts"),
         import("@injectivelabs/sdk-ts/utils"),
+        import("@injectivelabs/utils"),
       ]);
 
       return {
@@ -115,6 +129,7 @@ async function loadInjectiveModules() {
         ...sdkTx,
         ...sdkAccounts,
         ...sdkUtils,
+        BigNumber: baseUtils.BigNumber,
       };
     })();
   }
@@ -146,7 +161,12 @@ export async function fetchDerivativePositions(
       const direction = String(position.direction || "").toLowerCase();
       const side: OrderSide =
         direction === "buy" || direction === "long" ? "long" : "short";
-      const quantity = Math.abs(Number(position.quantity || 0));
+      const quantityText = new modules.BigNumber(
+        String(position.quantity || "0"),
+      )
+        .absoluteValue()
+        .toFixed();
+      const quantity = Math.abs(Number(quantityText));
       const entryPrice = Number(position.entryPrice || 0);
       const markPrice = Number(position.markPrice || 0);
       const margin = Number(position.margin || 0);
@@ -157,9 +177,13 @@ export async function fetchDerivativePositions(
 
       return {
         marketId: String(position.marketId || ""),
+        subaccountId: String(
+          position.subaccountId || modules.getDefaultSubaccountId(injectiveAddress),
+        ),
         ticker: String(position.ticker || "Unknown market"),
         side,
         quantity,
+        quantityText,
         entryPrice,
         markPrice,
         margin,
@@ -246,25 +270,12 @@ async function findLiquidDerivativeMarket(
   );
 }
 
-export async function placeDerivativeMarketOrder(
-  input: PlaceOrderInput,
-): Promise<PlaceOrderResult> {
-  const modules = await loadInjectiveModules();
-  const normalizedPrivateKey = normalizePrivateKey(input.privateKey);
-  const privateKey = modules.PrivateKey.fromHex(normalizedPrivateKey);
-  const injectiveAddress = privateKey.toBech32();
-  const markets = await fetchMarkets(modules);
-  const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
-  const derivativesApi = new modules.IndexerGrpcDerivativesApi(
-    endpoints.indexer,
-  );
-  const { bestLevel, market } = await findLiquidDerivativeMarket(
-    derivativesApi,
-    markets,
-    input.marketQuery,
-    input.side,
-  );
-
+function getMarketOrderPricing(
+  modules: any,
+  market: any,
+  bestLevel: any,
+  side: OrderSide,
+) {
   const quoteDecimals = Number(market.quoteToken?.decimals ?? 6);
   const multipliers = modules.getDerivativeMarketTensMultiplier({
     quoteDecimals,
@@ -284,19 +295,134 @@ export async function placeDerivativeMarketOrder(
   }
 
   const protectedPrice =
-    input.side === "long"
-      ? referencePrice * 1.005
-      : referencePrice * 0.995;
-  const rawQuantity = input.notional / protectedPrice;
-  const rawMargin = input.notional / input.leverage;
+    side === "long" ? referencePrice * 1.005 : referencePrice * 0.995;
   const allowedPrice = modules.formatPriceToAllowablePrice(
     protectedPrice,
     multipliers.priceTensMultiplier,
   );
+
+  return {
+    allowedPrice,
+    multipliers,
+    quoteDecimals,
+  };
+}
+
+function getEntryOrderSize(
+  modules: any,
+  market: any,
+  allowedPrice: string,
+  requestedNotional: number,
+  maxNotional: number,
+  quantityTensMultiplier: number,
+) {
+  const BigNumber = modules.BigNumber;
+  const price = new BigNumber(allowedPrice);
+  const tick = new BigNumber(market.minQuantityTickSize || 0);
+  const requested = new BigNumber(Math.max(1, requestedNotional));
+  const cap = new BigNumber(Math.max(1, maxNotional));
+  const marketMinimum = new BigNumber(Math.max(0, Number(market.minNotional || 0)));
+
+  if (!price.isFinite() || price.lte(0) || !tick.isFinite() || tick.lte(0)) {
+    throw new Error(`${market.ticker} 当前交易步进无效，请稍后重试。`);
+  }
+
+  const requestedSteps = requested
+    .dividedBy(price)
+    .dividedBy(tick)
+    .integerValue(BigNumber.ROUND_FLOOR);
+  let quantity = requestedSteps.multipliedBy(tick);
+  let actualNotional = quantity.multipliedBy(price);
+
+  if (quantity.lte(0) || actualNotional.lt(marketMinimum)) {
+    const minimumSteps = marketMinimum
+      .dividedBy(price)
+      .dividedBy(tick)
+      .integerValue(BigNumber.ROUND_CEIL);
+    quantity = BigNumber.maximum(1, minimumSteps).multipliedBy(tick);
+    actualNotional = quantity.multipliedBy(price);
+  }
+
+  if (actualNotional.gt(cap)) {
+    throw new Error(
+      `${market.ticker} 当前最小可成交约 $${actualNotional.toFixed(
+        2,
+      )}，超过你设置的 $${cap.toFixed(2)} 单次上限。`,
+    );
+  }
+
   const allowedQuantity = modules.formatAmountToAllowableAmount(
-    Math.max(rawQuantity, Number(market.minQuantityTickSize || 0)),
+    quantity.toFixed(),
+    quantityTensMultiplier,
+  );
+
+  return {
+    allowedQuantity,
+    actualNotional: Number(actualNotional.toFixed()),
+  };
+}
+
+async function broadcastDerivativeOrder(
+  modules: any,
+  normalizedPrivateKey: string,
+  endpoints: any,
+  msg: any,
+) {
+  const broadcaster = new modules.MsgBroadcasterWithPk({
+    privateKey: normalizedPrivateKey,
+    network: modules.Network.Mainnet,
+    endpoints,
+    simulateTx: true,
+    gasBufferCoefficient: 1.1,
+  });
+  let response;
+  try {
+    response = await broadcaster.broadcast({ msgs: msg });
+  } catch (error) {
+    throw new Error(normalizeInjectiveOrderError(error));
+  }
+
+  if (response.code !== 0) {
+    throw new Error(normalizeInjectiveOrderError(response.rawLog));
+  }
+
+  return response;
+}
+
+export async function placeDerivativeMarketOrder(
+  input: PlaceOrderInput,
+): Promise<PlaceOrderResult> {
+  const modules = await loadInjectiveModules();
+  const normalizedPrivateKey = normalizePrivateKey(input.privateKey);
+  const privateKey = modules.PrivateKey.fromHex(normalizedPrivateKey);
+  const injectiveAddress = privateKey.toBech32();
+  const markets = await fetchMarkets(modules);
+  const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
+  const derivativesApi = new modules.IndexerGrpcDerivativesApi(
+    endpoints.indexer,
+  );
+  const { bestLevel, market } = await findLiquidDerivativeMarket(
+    derivativesApi,
+    markets,
+    input.marketQuery,
+    input.side,
+  );
+
+  const { allowedPrice, multipliers, quoteDecimals } = getMarketOrderPricing(
+    modules,
+    market,
+    bestLevel,
+    input.side,
+  );
+  const { actualNotional, allowedQuantity } = getEntryOrderSize(
+    modules,
+    market,
+    allowedPrice,
+    input.notional,
+    input.maxNotional,
     multipliers.quantityTensMultiplier,
   );
+  const rawMargin = actualNotional / input.leverage;
   const subaccountId = modules.getDefaultSubaccountId(injectiveAddress);
 
   const msg = modules.MsgCreateDerivativeMarketOrder.fromJSON({
@@ -322,29 +448,103 @@ export async function placeDerivativeMarketOrder(
     }),
   });
 
-  const broadcaster = new modules.MsgBroadcasterWithPk({
-    privateKey: normalizedPrivateKey,
-    network: modules.Network.Mainnet,
+  const response = await broadcastDerivativeOrder(
+    modules,
+    normalizedPrivateKey,
     endpoints,
-    simulateTx: true,
-    gasBufferCoefficient: 1.1,
-  });
-  let response;
-  try {
-    response = await broadcaster.broadcast({ msgs: msg });
-  } catch (error) {
-    throw new Error(normalizeInjectiveOrderError(error));
-  }
-
-  if (response.code !== 0) {
-    throw new Error(normalizeInjectiveOrderError(response.rawLog));
-  }
+    msg,
+  );
 
   return {
     txHash: response.txHash,
     ticker: market.ticker,
     price: Number(allowedPrice),
     quantity: Number(allowedQuantity),
+    notional: actualNotional,
+    injectiveAddress,
+  };
+}
+
+export async function closeDerivativePosition(
+  input: ClosePositionInput,
+): Promise<PlaceOrderResult> {
+  const modules = await loadInjectiveModules();
+  const normalizedPrivateKey = normalizePrivateKey(input.privateKey);
+  const privateKey = modules.PrivateKey.fromHex(normalizedPrivateKey);
+  const injectiveAddress = privateKey.toBech32();
+  const markets = await fetchMarkets(modules);
+  const market = markets.find(
+    (candidate) => String(candidate.marketId) === input.marketId,
+  );
+
+  if (!market) {
+    throw new Error("Injective Mainnet 暂未找到这个持仓对应的市场。");
+  }
+
+  const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
+  const derivativesApi = new modules.IndexerGrpcDerivativesApi(
+    endpoints.indexer,
+  );
+  const closeSide: OrderSide =
+    input.positionSide === "long" ? "short" : "long";
+  const orderbook = await derivativesApi.fetchOrderbookV2(market.marketId);
+  const bestLevel = getBestOrderbookLevel(orderbook, closeSide);
+
+  if (!bestLevel) {
+    throw new Error(`${market.ticker} 当前没有足够的订单簿流动性完成平仓。`);
+  }
+
+  const { allowedPrice, multipliers, quoteDecimals } = getMarketOrderPricing(
+    modules,
+    market,
+    bestLevel,
+    closeSide,
+  );
+  const allowedQuantity = modules.formatAmountToAllowableAmount(
+    input.quantity,
+    multipliers.quantityTensMultiplier,
+  );
+
+  if (Number(allowedQuantity) <= 0) {
+    throw new Error(`${market.ticker} 当前持仓数量无效，无法平仓。`);
+  }
+
+  const msg = modules.MsgCreateDerivativeMarketOrder.fromJSON({
+    marketId: market.marketId,
+    subaccountId: input.subaccountId,
+    injectiveAddress,
+    orderType: getDerivativeMarketOrderType(closeSide),
+    triggerPrice: "0",
+    feeRecipient: injectiveAddress,
+    price: modules.derivativePriceToChainPriceToFixed({
+      value: allowedPrice,
+      tensMultiplier: multipliers.priceTensMultiplier,
+      quoteDecimals,
+    }),
+    quantity: modules.derivativeQuantityToChainQuantityToFixed({
+      value: allowedQuantity,
+      tensMultiplier: multipliers.quantityTensMultiplier,
+    }),
+    margin: modules.derivativeMarginToChainMarginToFixed({
+      value: 0,
+      quoteDecimals,
+      tensMultiplier: multipliers.priceTensMultiplier,
+    }),
+  });
+  const response = await broadcastDerivativeOrder(
+    modules,
+    normalizedPrivateKey,
+    endpoints,
+    msg,
+  );
+  const orderNotional = Number(allowedPrice) * Number(allowedQuantity);
+
+  return {
+    txHash: response.txHash,
+    ticker: market.ticker,
+    price: Number(allowedPrice),
+    quantity: Number(allowedQuantity),
+    notional: orderNotional,
     injectiveAddress,
   };
 }

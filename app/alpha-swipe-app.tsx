@@ -34,6 +34,7 @@ import {
   type SignalResearch,
 } from "./news-data";
 import {
+  closeDerivativePosition,
   deriveInjectiveAddress,
   fetchDerivativePositions,
   placeDerivativeMarketOrder,
@@ -51,7 +52,36 @@ type ChatMessage = {
 };
 
 const LONG_PRESS_MS = 560;
+const SWIPE_TRIGGER_PX = 88;
+const FULL_SIZE_SWIPE_PX = 220;
+const MIN_SWIPE_NOTIONAL = 1;
 const LOCAL_PRIVATE_KEY_STORAGE_KEY = "alphaswipe.injectivePrivateKey";
+
+function getSwipeNotional(distance: number, maxNotional: number) {
+  const safeMax = Math.max(MIN_SWIPE_NOTIONAL, maxNotional);
+  const progress = Math.min(
+    1,
+    Math.max(
+      0,
+      (distance - SWIPE_TRIGGER_PX) /
+        (FULL_SIZE_SWIPE_PX - SWIPE_TRIGGER_PX),
+    ),
+  );
+  return (
+    Math.round(
+      (MIN_SWIPE_NOTIONAL + (safeMax - MIN_SWIPE_NOTIONAL) * progress) *
+        100,
+    ) / 100
+  );
+}
+
+function formatNotional(value: number) {
+  return value >= 100 ? value.toFixed(0) : value.toFixed(2);
+}
+
+function getPositionKey(position: DerivativePosition) {
+  return `${position.subaccountId}-${position.marketId}-${position.side}`;
+}
 
 function shortAddress(address: string) {
   return `${address.slice(0, 7)}…${address.slice(-5)}`;
@@ -260,13 +290,16 @@ export function AlphaSwipeApp() {
   const [positions, setPositions] = useState<DerivativePosition[]>([]);
   const [positionsBusy, setPositionsBusy] = useState(false);
   const [positionsError, setPositionsError] = useState("");
-  const [notional, setNotional] = useState(100);
+  const [maxNotional, setMaxNotional] = useState(100);
   const [leverage, setLeverage] = useState(3);
   const [privateKeyDraft, setPrivateKeyDraft] = useState("");
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [signerAddress, setSignerAddress] = useState("");
   const [keyBusy, setKeyBusy] = useState(false);
   const [tradeBusy, setTradeBusy] = useState(false);
+  const [activeTradeNotional, setActiveTradeNotional] = useState(0);
+  const [closeConfirmKey, setCloseConfirmKey] = useState("");
+  const [closingPositionKey, setClosingPositionKey] = useState("");
   const [toast, setToast] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -284,6 +317,7 @@ export function AlphaSwipeApp() {
   });
 
   const current = signals[index] ?? null;
+  const swipeNotional = getSwipeNotional(Math.abs(drag.x), maxNotional);
   const totalUnrealizedPnl = positions.reduce(
     (sum, position) => sum + position.unrealizedPnl,
     0,
@@ -400,7 +434,7 @@ export function AlphaSwipeApp() {
   );
 
   const executeSwipeOrder = useCallback(
-    async (side: OrderSide) => {
+    async (side: OrderSide, orderNotional: number) => {
       if (!current || tradeBusy || exitAction) return;
       if (!signerAddress || !privateKeyRef.current) {
         showToast("请先在 Settings 添加会话私钥");
@@ -409,21 +443,32 @@ export function AlphaSwipeApp() {
       }
 
       setTradeBusy(true);
-      showToast(`Signing ${side} · Mainnet real funds`);
+      setActiveTradeNotional(orderNotional);
+      showToast(
+        `Signing ${side} · $${formatNotional(orderNotional)} · Mainnet`,
+      );
       try {
         const result = await placeDerivativeMarketOrder({
           privateKey: privateKeyRef.current,
           marketQuery: current.marketQuery,
           side,
-          notional,
+          notional: orderNotional,
+          maxNotional,
           leverage,
         });
-        advance(side, `Broadcast · ${result.txHash.slice(0, 10)}…`);
+        advance(
+          side,
+          `Broadcast $${formatNotional(result.notional)} · ${result.txHash.slice(
+            0,
+            10,
+          )}…`,
+        );
         void refreshPositions(result.injectiveAddress);
       } catch (error) {
         showToast(error instanceof Error ? error.message : "订单提交失败");
       } finally {
         setTradeBusy(false);
+        setActiveTradeNotional(0);
       }
     },
     [
@@ -431,7 +476,7 @@ export function AlphaSwipeApp() {
       current,
       exitAction,
       leverage,
-      notional,
+      maxNotional,
       refreshPositions,
       showToast,
       signerAddress,
@@ -440,15 +485,41 @@ export function AlphaSwipeApp() {
   );
 
   const decide = useCallback(
-    async (action: Decision) => {
+    async (action: Decision, orderNotional = MIN_SWIPE_NOTIONAL) => {
       if (!current || exitAction || chatOpen) return;
       if (action === "skip") {
         advance("skip");
         return;
       }
-      await executeSwipeOrder(action);
+      await executeSwipeOrder(action, orderNotional);
     },
     [advance, chatOpen, current, executeSwipeOrder, exitAction],
+  );
+
+  const closePosition = useCallback(
+    async (position: DerivativePosition) => {
+      if (!signerAddress || !privateKeyRef.current || closingPositionKey) return;
+      const positionKey = getPositionKey(position);
+      setClosingPositionKey(positionKey);
+      showToast(`Closing ${position.ticker} · reduce-only`);
+      try {
+        const result = await closeDerivativePosition({
+          privateKey: privateKeyRef.current,
+          marketId: position.marketId,
+          subaccountId: position.subaccountId,
+          positionSide: position.side,
+          quantity: position.quantityText,
+        });
+        setCloseConfirmKey("");
+        showToast(`Close broadcast · ${result.txHash.slice(0, 10)}…`);
+        await refreshPositions(result.injectiveAddress);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "平仓提交失败");
+      } finally {
+        setClosingPositionKey("");
+      }
+    },
+    [closingPositionKey, refreshPositions, showToast, signerAddress],
   );
 
   useEffect(() => {
@@ -469,7 +540,7 @@ export function AlphaSwipeApp() {
       };
       if (keyMap[event.key]) {
         event.preventDefault();
-        void decide(keyMap[event.key]);
+        void decide(keyMap[event.key], MIN_SWIPE_NOTIONAL);
       }
       if (event.key === " ") {
         event.preventDefault();
@@ -501,6 +572,7 @@ export function AlphaSwipeApp() {
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (tradeBusy || exitAction) return;
     if ((event.target as HTMLElement).closest("button, a, input, textarea")) {
       return;
     }
@@ -561,8 +633,11 @@ export function AlphaSwipeApp() {
       return;
     }
     if (!detailsOpen) {
-      if (Math.abs(drag.x) > 88 && Math.abs(drag.x) > Math.abs(drag.y)) {
-        void decide(drag.x < 0 ? "long" : "short");
+      if (
+        Math.abs(drag.x) > SWIPE_TRIGGER_PX &&
+        Math.abs(drag.x) > Math.abs(drag.y)
+      ) {
+        void decide(drag.x < 0 ? "long" : "short", swipeNotional);
       } else if (
         drag.y < -76 &&
         Math.abs(drag.y) > Math.abs(drag.x) * 0.75
@@ -614,6 +689,8 @@ export function AlphaSwipeApp() {
     setSignerAddress("");
     setPositions([]);
     setPositionsError("");
+    setCloseConfirmKey("");
+    setClosingPositionKey("");
     showToast("Local key cleared");
   };
 
@@ -702,13 +779,15 @@ export function AlphaSwipeApp() {
                       className="swipe-stamp stamp-long"
                       style={{ opacity: Math.max(0, -drag.x / 90) }}
                     >
-                      LONG
+                      <span>LONG</span>
+                      <small>${formatNotional(swipeNotional)}</small>
                     </div>
                     <div
                       className="swipe-stamp stamp-short"
                       style={{ opacity: Math.max(0, drag.x / 90) }}
                     >
-                      SHORT
+                      <span>SHORT</span>
+                      <small>${formatNotional(swipeNotional)}</small>
                     </div>
                     <div
                       className="swipe-stamp stamp-skip"
@@ -720,7 +799,10 @@ export function AlphaSwipeApp() {
                       <div className="trade-lock">
                         <LoaderCircle className="spin" />
                         <strong>Signing Mainnet order</strong>
-                        <small>Keep this page open</small>
+                        <small>
+                          ${formatNotional(activeTradeNotional)} · {leverage}×
+                          leverage
+                        </small>
                       </div>
                     )}
                     <div className="card-inner">
@@ -876,11 +958,16 @@ export function AlphaSwipeApp() {
                       </button>
                     </div>
                   ) : positions.length ? (
-                    positions.map((position) => (
-                      <article
-                        className="position-item"
-                        key={`${position.marketId}-${position.side}`}
-                      >
+                    positions.map((position) => {
+                      const positionKey = getPositionKey(position);
+                      const isConfirming = closeConfirmKey === positionKey;
+                      const isClosing = closingPositionKey === positionKey;
+
+                      return (
+                        <article
+                          className="position-item"
+                          key={positionKey}
+                        >
                         <div className="position-item-heading">
                           <span className={position.side}>
                             {position.side === "long" ? (
@@ -931,8 +1018,54 @@ export function AlphaSwipeApp() {
                             </strong>
                           </span>
                         </div>
+                        <div
+                          className={`position-close-row${isConfirming ? " is-confirming" : ""}`}
+                        >
+                          {isConfirming ? (
+                            <>
+                              <div>
+                                <strong>Close entire position?</strong>
+                                <small>
+                                  Market reduce-only · {position.quantityText}
+                                </small>
+                              </div>
+                              <button
+                                type="button"
+                                className="close-cancel"
+                                disabled={isClosing}
+                                onClick={() => setCloseConfirmKey("")}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="close-confirm"
+                                disabled={isClosing}
+                                onClick={() => void closePosition(position)}
+                              >
+                                {isClosing ? (
+                                  <LoaderCircle className="spin" />
+                                ) : (
+                                  <X />
+                                )}
+                                {isClosing ? "Closing" : "Confirm close"}
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="close-position-button"
+                              disabled={Boolean(closingPositionKey)}
+                              onClick={() => setCloseConfirmKey(positionKey)}
+                            >
+                              <X />
+                              Close position
+                            </button>
+                          )}
+                        </div>
                       </article>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="empty-state compact">
                       <BarChart3 />
@@ -1082,21 +1215,28 @@ export function AlphaSwipeApp() {
               <section className="settings-card">
                 <div className="settings-title">
                   <div>
-                    <h2>Direct trade setup</h2>
-                    <p>Applied immediately to every horizontal swipe.</p>
+                    <h2>Swipe trade setup</h2>
+                    <p>Leverage stays fixed. Swipe farther to size up.</p>
                   </div>
                   <Settings />
                 </div>
                 <label className="setting-range">
-                  <span>Notional <strong>${notional}</strong></span>
+                  <span>
+                    Max notional <strong>${maxNotional}</strong>
+                  </span>
                   <input
                     type="range"
                     min="1"
                     max="500"
                     step="1"
-                    value={notional}
-                    onChange={(event) => setNotional(Number(event.target.value))}
+                    value={maxNotional}
+                    onChange={(event) =>
+                      setMaxNotional(Number(event.target.value))
+                    }
                   />
+                  <small className="setting-range-hint">
+                    $1 at the trigger · full swipe uses this cap
+                  </small>
                 </label>
                 <label className="setting-range">
                   <span>Leverage <strong>{leverage}×</strong></span>
