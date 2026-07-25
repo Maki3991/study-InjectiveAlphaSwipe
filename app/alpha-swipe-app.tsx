@@ -77,32 +77,14 @@ function clearStoredPrivateKey() {
   }
 }
 
-function buildAssistantAnswer(item: NewsItem, question: string) {
-  const normalized = question.toLowerCase();
+type AiChatResponse = {
+  answer?: string;
+  error?: string;
+};
 
-  if (
-    item.earnings &&
-    /earn|财报|revenue|margin|eps|利润|营收|估值/.test(normalized)
-  ) {
-    const metrics = item.earnings.metrics
-      .map((metric) => `${metric.label} ${metric.value} (${metric.change})`)
-      .join("；");
-    return `${item.earnings.period} 的关键数字是：${metrics}。${item.earnings.analysis} 下一步重点看：${item.earnings.nextWatch}`;
-  }
-  if (/bear|risk|down|空|风险|跌|反方/.test(normalized)) {
-    return `核心反方逻辑：${item.bearCase} 目前最需要监控的风险是 ${item.risk}。如果这个风险开始出现在数据或指引中，原有信号置信度应该下调。`;
-  }
-  if (/bull|up|long|多|涨|正方|机会/.test(normalized)) {
-    return `核心正方逻辑：${item.bullCase} 最近的可验证催化剂是 ${item.catalyst}。这只是研究框架，不是替你做方向决策。`;
-  }
-  if (/trade|position|leverage|交易|仓位|杠杆|下单/.test(normalized)) {
-    return `这条信号对应 ${item.marketLabel}，当前默认设置是主网真实资金交易。对话只做研究，不会替你下单；实际滑动前应重新检查订单簿、点差、保证金和最大可承受亏损。`;
-  }
-  if (/source|来源|真假|original|原文/.test(normalized)) {
-    return `当前信号来源是 ${item.source}，发布时间为 ${item.published}。详情页保留了原文入口；我会把新闻事实和 AlphaSwipe 的推演分开，避免把分析写成已发生事实。`;
-  }
-
-  return `${item.marketQuery} 的当前信号可以拆成三层：新闻事实是“${item.title}”；正方逻辑是“${item.bullCase}”；反方逻辑是“${item.bearCase}”。你可以继续追问财报、催化剂、风险或这条逻辑最容易在哪里失效。`;
+function formatChatError(error: unknown) {
+  const message = error instanceof Error ? error.message : "AI 对话暂时不可用";
+  return `AI 对话暂时不可用：${message}`;
 }
 
 export function AlphaSwipeApp() {
@@ -451,9 +433,10 @@ export function AlphaSwipeApp() {
     showToast("Local key cleared");
   };
 
-  const sendChatMessage = (question = chatInput) => {
+  const sendChatMessage = async (question = chatInput) => {
     const value = question.trim();
     if (!value || !current || chatBusy) return;
+    const signalForQuestion = current;
     chatMessageId.current += 1;
     const userMessage: ChatMessage = {
       id: `user-${chatMessageId.current}`,
@@ -463,18 +446,42 @@ export function AlphaSwipeApp() {
     setChatMessages((messages) => [...messages, userMessage]);
     setChatInput("");
     setChatBusy(true);
-    window.setTimeout(() => {
+    try {
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: value,
+          signal: signalForQuestion,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as AiChatResponse;
+      if (!response.ok || !payload.answer) {
+        throw new Error(payload.error || "OpenAI API 没有返回内容");
+      }
+
       chatMessageId.current += 1;
       setChatMessages((messages) => [
         ...messages,
         {
           id: `assistant-${chatMessageId.current}`,
           role: "assistant",
-          text: buildAssistantAnswer(current, value),
+          text: payload.answer,
         },
       ]);
+    } catch (error) {
+      chatMessageId.current += 1;
+      setChatMessages((messages) => [
+        ...messages,
+        {
+          id: `assistant-${chatMessageId.current}`,
+          role: "assistant",
+          text: formatChatError(error),
+        },
+      ]);
+    } finally {
       setChatBusy(false);
-    }, 420);
+    }
   };
 
   const cardStyle = {
@@ -1078,7 +1085,7 @@ export function AlphaSwipeApp() {
                 <button
                   type="button"
                   key={prompt}
-                  onClick={() => sendChatMessage(prompt)}
+                  onClick={() => void sendChatMessage(prompt)}
                   disabled={chatBusy}
                 >
                   {prompt}
@@ -1089,7 +1096,7 @@ export function AlphaSwipeApp() {
               className="ai-composer"
               onSubmit={(event) => {
                 event.preventDefault();
-                sendChatMessage();
+                void sendChatMessage();
               }}
             >
               <input
@@ -1107,7 +1114,7 @@ export function AlphaSwipeApp() {
               </button>
             </form>
             <small className="ai-disclaimer">
-              Contextual research only · this chat cannot place trades
+              ChatGPT API research only · this chat cannot place trades
             </small>
           </section>
         </div>

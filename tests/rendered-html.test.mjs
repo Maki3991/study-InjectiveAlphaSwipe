@@ -49,7 +49,7 @@ test("server-renders the AlphaSwipe product shell", async () => {
 });
 
 test("starter preview is removed and product assets are wired", async () => {
-  const [page, layout, packageJson, newsData, injectiveClient, swipeApp] =
+  const [page, layout, packageJson, newsData, injectiveClient, swipeApp, aiRoute, envExample] =
     await Promise.all([
       readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -57,6 +57,8 @@ test("starter preview is removed and product assets are wired", async () => {
       readFile(new URL("../app/news-data.ts", import.meta.url), "utf8"),
       readFile(new URL("../lib/injective-client.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/alpha-swipe-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/ai/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../.env.example", import.meta.url), "utf8"),
     ]);
 
   assert.match(page, /<AlphaSwipeApp \/>/);
@@ -94,9 +96,24 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /localStorage\.removeItem/);
   assert.match(swipeApp, /privateKeyRef/);
   assert.match(swipeApp, /openSignalChat/);
+  assert.match(swipeApp, /fetch\("\/api\/ai"/);
+  assert.match(swipeApp, /signalForQuestion/);
+  assert.match(swipeApp, /ChatGPT API research only/);
+  assert.doesNotMatch(swipeApp, /buildAssistantAnswer/);
   assert.doesNotMatch(swipeApp, /className="app-topbar"|className="feed-meta"|className="mainnet-live"/);
   assert.doesNotMatch(swipeApp, /Connect Keplr|connectKeplr|order-sheet|quick-order/);
   assert.doesNotMatch(swipeApp, /className="swipe-actions"|className="gesture-hint"/);
+  assert.match(aiRoute, /https:\/\/api\.openai\.com\/v1\/responses/);
+  assert.match(aiRoute, /DEFAULT_OPENAI_MODEL\s*=\s*"gpt-5\.6-sol"/);
+  assert.match(aiRoute, /OPENAI_API_KEY/);
+  assert.match(aiRoute, /OPENAI_MODEL/);
+  assert.match(aiRoute, /OPENAI_REASONING_EFFORT/);
+  assert.match(aiRoute, /reasoning:\s*\{\s*effort:\s*reasoningEffort\s*\}/);
+  assert.match(aiRoute, /store:\s*false/);
+  assert.match(aiRoute, /ALLOWED_SYMBOLS/);
+  assert.match(envExample, /OPENAI_API_KEY=/);
+  assert.match(envExample, /OPENAI_MODEL=gpt-5\.6-sol/);
+  assert.match(envExample, /OPENAI_REASONING_EFFORT=low/);
 
   await assert.rejects(
     access(new URL("../app/_sites-preview", import.meta.url)),
