@@ -55,6 +55,7 @@ const LONG_PRESS_MS = 560;
 const SWIPE_TRIGGER_PX = 88;
 const FULL_SIZE_SWIPE_PX = 220;
 const MIN_SWIPE_NOTIONAL = 1;
+const POSITION_REFRESH_MS = 10_000;
 const LOCAL_PRIVATE_KEY_STORAGE_KEY = "alphaswipe.injectivePrivateKey";
 
 function getSwipeNotional(distance: number, maxNotional: number) {
@@ -77,6 +78,26 @@ function getSwipeNotional(distance: number, maxNotional: number) {
 
 function formatNotional(value: number) {
   return value >= 100 ? value.toFixed(0) : value.toFixed(2);
+}
+
+function formatPositionPnl(value: number) {
+  const absoluteValue = Math.abs(value);
+  const decimals = absoluteValue > 0 && absoluteValue < 0.01 ? 6 : 2;
+  return `${value >= 0 ? "+" : "-"}$${absoluteValue.toFixed(decimals)}`;
+}
+
+function formatPositionQuantity(value: number) {
+  return value
+    .toFixed(8)
+    .replace(/0+$/, "")
+    .replace(/\.$/, "");
+}
+
+function formatPositionPrice(value: number) {
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function getPositionKey(position: DerivativePosition) {
@@ -306,6 +327,7 @@ export function AlphaSwipeApp() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const privateKeyRef = useRef("");
+  const positionsRequestInFlightRef = useRef(false);
   const chatMessageId = useRef(0);
   const pointer = useRef({
     active: false,
@@ -401,7 +423,8 @@ export function AlphaSwipeApp() {
 
   const refreshPositions = useCallback(
     async (address = signerAddress) => {
-      if (!address) return;
+      if (!address || positionsRequestInFlightRef.current) return;
+      positionsRequestInFlightRef.current = true;
       setPositionsBusy(true);
       setPositionsError("");
       try {
@@ -412,11 +435,23 @@ export function AlphaSwipeApp() {
         setPositionsError(message);
         showToast(message);
       } finally {
+        positionsRequestInFlightRef.current = false;
         setPositionsBusy(false);
       }
     },
     [showToast, signerAddress],
   );
+
+  useEffect(() => {
+    if (activeTab !== "position" || !signerAddress) return;
+
+    void refreshPositions(signerAddress);
+    const intervalId = window.setInterval(() => {
+      void refreshPositions(signerAddress);
+    }, POSITION_REFRESH_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeTab, refreshPositions, signerAddress]);
 
   const advance = useCallback(
     (action: Decision, message?: string) => {
@@ -919,8 +954,7 @@ export function AlphaSwipeApp() {
                         totalUnrealizedPnl >= 0 ? "is-profit" : "is-loss"
                       }
                     >
-                      {totalUnrealizedPnl >= 0 ? "+" : "-"}$
-                      {Math.abs(totalUnrealizedPnl).toFixed(2)}
+                      {formatPositionPnl(totalUnrealizedPnl)}
                     </strong>
                   </div>
                   <div className="position-summary-stats">
@@ -940,7 +974,7 @@ export function AlphaSwipeApp() {
                 </div>
                 <div className="section-title">
                   <span>Open positions</span>
-                  <small>Mark-to-market PnL</small>
+                  <small>Live PnL · refreshes every 10s</small>
                 </div>
                 <div className="positions-scroll">
                   {positionsBusy && positions.length === 0 ? (
@@ -995,29 +1029,36 @@ export function AlphaSwipeApp() {
                                   : "is-loss"
                               }
                             >
-                              {position.unrealizedPnl >= 0 ? "+" : "-"}$
-                              {Math.abs(position.unrealizedPnl).toFixed(2)}
+                              {formatPositionPnl(position.unrealizedPnl)}
                             </strong>
                           </div>
                         </div>
                         <div className="position-details">
                           <span>
                             <small>Quantity</small>
-                            <strong>{position.quantity.toFixed(4)}</strong>
+                            <strong>
+                              {formatPositionQuantity(position.quantity)}
+                            </strong>
                           </span>
                           <span>
                             <small>Entry</small>
-                            <strong>${position.entryPrice.toFixed(2)}</strong>
+                            <strong>
+                              ${formatPositionPrice(position.entryPrice)}
+                            </strong>
                           </span>
                           <span>
                             <small>Mark</small>
-                            <strong>${position.markPrice.toFixed(2)}</strong>
+                            <strong>
+                              ${formatPositionPrice(position.markPrice)}
+                            </strong>
                           </span>
                           <span>
                             <small>Liquidation</small>
                             <strong>
                               {position.liquidationPrice
-                                ? `$${position.liquidationPrice.toFixed(2)}`
+                                ? `$${formatPositionPrice(
+                                    position.liquidationPrice,
+                                  )}`
                                 : "—"}
                             </strong>
                           </span>
@@ -1279,10 +1320,7 @@ export function AlphaSwipeApp() {
         <button
           className={activeTab === "position" ? "is-active" : ""}
           type="button"
-          onClick={() => {
-            setActiveTab("position");
-            if (signerAddress) void refreshPositions(signerAddress);
-          }}
+          onClick={() => setActiveTab("position")}
         >
           <BarChart3 /><span>Position</span>
         </button>

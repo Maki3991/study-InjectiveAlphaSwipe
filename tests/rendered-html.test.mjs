@@ -104,6 +104,7 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(injectiveClient, /余额不足/);
   assert.match(injectiveClient, /已检查/);
   assert.match(injectiveClient, /fetchPositionsV2/);
+  assert.match(injectiveClient, /derivativeMarginFromChainMarginToFixed/);
   assert.match(injectiveClient, /Network\.Mainnet/);
   assert.doesNotMatch(injectiveClient, /Network\.Testnet|ChainId\.Testnet/);
   assert.match(injectiveClient, /derivativePriceFromChainPriceToFixed/);
@@ -120,6 +121,10 @@ test("starter preview is removed and product assets are wired", async () => {
   );
   assert.match(swipeApp, /function getSwipeNotional/);
   assert.match(swipeApp, /FULL_SIZE_SWIPE_PX\s*=\s*220/);
+  assert.match(swipeApp, /POSITION_REFRESH_MS\s*=\s*10_000/);
+  assert.match(swipeApp, /window\.setInterval/);
+  assert.match(swipeApp, /positionsRequestInFlightRef/);
+  assert.match(swipeApp, /Live PnL · refreshes every 10s/);
   assert.match(swipeApp, /className="swipe-amount"/);
   assert.match(swipeApp, /Max notional/);
   assert.match(swipeApp, /closeDerivativePosition/);

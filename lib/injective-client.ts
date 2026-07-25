@@ -154,10 +154,32 @@ export async function fetchDerivativePositions(
   const modules = await loadInjectiveModules();
   const endpoints = modules.getNetworkEndpoints(modules.Network.Mainnet);
   const api = new modules.IndexerGrpcDerivativesApi(endpoints.indexer);
-  const response = await api.fetchPositionsV2({ address: injectiveAddress });
+  const [response, markets] = await Promise.all([
+    api.fetchPositionsV2({ address: injectiveAddress }),
+    fetchMarkets(modules),
+  ]);
+  const marketsById = new Map(
+    markets.map((market) => [String(market.marketId), market]),
+  );
 
   return response.positions
     .map((position: any) => {
+      const market = marketsById.get(String(position.marketId || ""));
+      const quoteDecimals = Number(market?.quoteToken?.decimals ?? 6);
+      const fromChainPrice = (value: unknown) =>
+        Number(
+          modules.derivativePriceFromChainPriceToFixed({
+            value: String(value || "0"),
+            quoteDecimals,
+          }),
+        );
+      const fromChainQuoteAmount = (value: unknown) =>
+        Number(
+          modules.derivativeMarginFromChainMarginToFixed({
+            value: String(value || "0"),
+            quoteDecimals,
+          }),
+        );
       const direction = String(position.direction || "").toLowerCase();
       const side: OrderSide =
         direction === "buy" || direction === "long" ? "long" : "short";
@@ -167,10 +189,15 @@ export async function fetchDerivativePositions(
         .absoluteValue()
         .toFixed();
       const quantity = Math.abs(Number(quantityText));
-      const entryPrice = Number(position.entryPrice || 0);
-      const markPrice = Number(position.markPrice || 0);
-      const margin = Number(position.margin || 0);
-      const reportedPnl = Number(position.upnl);
+      const entryPrice = fromChainPrice(position.entryPrice);
+      const markPrice = fromChainPrice(position.markPrice);
+      const margin = fromChainQuoteAmount(position.margin);
+      const reportedPnl =
+        position.upnl === undefined ||
+        position.upnl === null ||
+        position.upnl === ""
+          ? Number.NaN
+          : fromChainQuoteAmount(position.upnl);
       const calculatedPnl =
         (side === "long" ? markPrice - entryPrice : entryPrice - markPrice) *
         quantity;
@@ -187,7 +214,7 @@ export async function fetchDerivativePositions(
         entryPrice,
         markPrice,
         margin,
-        liquidationPrice: Number(position.liquidationPrice || 0),
+        liquidationPrice: fromChainPrice(position.liquidationPrice),
         unrealizedPnl: Number.isFinite(reportedPnl)
           ? reportedPnl
           : calculatedPnl,
