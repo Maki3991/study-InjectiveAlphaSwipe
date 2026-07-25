@@ -175,7 +175,10 @@ export function AlphaSwipeApp() {
         return response.json() as Promise<{ signals?: NewsItem[] }>;
       })
       .then((payload) => {
-        if (payload.signals?.length === 8) setSignals(payload.signals);
+        if (payload.signals?.length) {
+          setSignals(payload.signals);
+          setIndex(0);
+        }
       })
       .catch(() => undefined);
     return () => controller.abort();

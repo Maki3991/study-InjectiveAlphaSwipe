@@ -49,7 +49,19 @@ test("server-renders the AlphaSwipe product shell", async () => {
 });
 
 test("starter preview is removed and product assets are wired", async () => {
-  const [page, layout, packageJson, newsData, injectiveClient, swipeApp, aiRoute, envExample] =
+  const [
+    page,
+    layout,
+    packageJson,
+    newsData,
+    injectiveClient,
+    swipeApp,
+    aiRoute,
+    signalsRoute,
+    syncNews,
+    newsCache,
+    envExample,
+  ] =
     await Promise.all([
       readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -58,6 +70,9 @@ test("starter preview is removed and product assets are wired", async () => {
       readFile(new URL("../lib/injective-client.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/alpha-swipe-app.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/api/ai/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/signals/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../scripts/sync-news.mjs", import.meta.url), "utf8"),
+      readFile(new URL("../data/news-cache.json", import.meta.url), "utf8"),
       readFile(new URL("../.env.example", import.meta.url), "utf8"),
     ]);
 
@@ -97,6 +112,7 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /privateKeyRef/);
   assert.match(swipeApp, /openSignalChat/);
   assert.match(swipeApp, /fetch\("\/api\/ai"/);
+  assert.match(swipeApp, /fetch\("\/api\/signals"/);
   assert.match(swipeApp, /signalForQuestion/);
   assert.match(swipeApp, /ChatGPT API research only/);
   assert.doesNotMatch(swipeApp, /buildAssistantAnswer/);
@@ -111,9 +127,26 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(aiRoute, /reasoning:\s*\{\s*effort:\s*reasoningEffort\s*\}/);
   assert.match(aiRoute, /store:\s*false/);
   assert.match(aiRoute, /ALLOWED_SYMBOLS/);
+  assert.match(signalsRoute, /news-cache\.json/);
+  assert.match(signalsRoute, /financialmodelingprep/);
+  assert.doesNotMatch(signalsRoute, /news\.google\.com/);
+  assert.match(syncNews, /financialmodelingprep\.com\/stable\/news/);
+  assert.match(syncNews, /STOCK_SYMBOLS\s*=\s*\["META", "NVDA", "AAPL", "TSLA"\]/);
+  assert.match(syncNews, /CRYPTO_SYMBOLS\s*=\s*\["BTCUSD", "ETHUSD", "BNBUSD", "INJUSD"\]/);
+  assert.match(syncNews, /WEEK_MS\s*=\s*7\s*\*/);
+  assert.match(syncNews, /thinking:\s*\{\s*type:\s*"enabled"\s*\}/);
+  assert.match(syncNews, /glm-4\.5-air/);
+  assert.match(syncNews, /chat\/completions/);
+  assert.match(packageJson, /"predev":\s*"node scripts\/sync-news\.mjs --if-missing"/);
+  assert.match(packageJson, /"news:refresh":\s*"node scripts\/sync-news\.mjs --refresh"/);
+  assert.match(newsCache, /"source":\s*"financialmodelingprep"/);
   assert.match(envExample, /OPENAI_API_KEY=/);
   assert.match(envExample, /OPENAI_MODEL=gpt-5\.6-sol/);
   assert.match(envExample, /OPENAI_REASONING_EFFORT=low/);
+  assert.match(envExample, /FMP_API_KEY=/);
+  assert.match(envExample, /LLM_BASE_URL=https:\/\/open\.bigmodel\.cn\/api\/paas\/v4/);
+  assert.match(envExample, /LLM_MODEL=glm-4\.5-air/);
+  assert.match(envExample, /LLM_THINKING=enabled/);
 
   await assert.rejects(
     access(new URL("../app/_sites-preview", import.meta.url)),

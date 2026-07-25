@@ -42,6 +42,7 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/data/.news-translation-cache.json
 
 # local reference corpus (not part of the deployable app)
 /injective-docs/
