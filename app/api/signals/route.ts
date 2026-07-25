@@ -126,6 +126,7 @@ export async function GET() {
 
   return Response.json(
     {
+      schemaVersion: 2,
       symbols: usingLocalCache
         ? [...new Set(signals.map((item) => item.marketQuery))]
         : NEWS_ITEMS.map((item) => item.marketQuery),
@@ -137,7 +138,7 @@ export async function GET() {
     },
     {
       headers: {
-        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+        "Cache-Control": "no-store, max-age=0",
       },
     },
   );

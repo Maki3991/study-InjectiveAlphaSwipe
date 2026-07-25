@@ -116,7 +116,9 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /privateKeyRef/);
   assert.match(swipeApp, /openSignalChat/);
   assert.match(swipeApp, /fetch\("\/api\/ai"/);
-  assert.match(swipeApp, /fetch\("\/api\/signals"/);
+  assert.match(swipeApp, /fetch\("\/api\/signals\?schema=research-v2"/);
+  assert.match(swipeApp, /cache:\s*"no-store"/);
+  assert.match(swipeApp, /schemaVersion === 2/);
   assert.match(swipeApp, /signalForQuestion/);
   assert.match(swipeApp, /ChatGPT API research only/);
   assert.match(swipeApp, /新闻信号评价/);
@@ -144,6 +146,8 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(aiRoute, /analysis:\s*signal\.analysis/);
   assert.match(signalsRoute, /news-cache\.json/);
   assert.match(signalsRoute, /financialmodelingprep/);
+  assert.match(signalsRoute, /schemaVersion:\s*2/);
+  assert.match(signalsRoute, /"Cache-Control":\s*"no-store, max-age=0"/);
   assert.doesNotMatch(signalsRoute, /news\.google\.com/);
   assert.match(syncNews, /financialmodelingprep\.com\/stable\/news/);
   assert.match(syncNews, /STOCK_SYMBOLS\s*=\s*\["META", "NVDA", "AAPL", "TSLA"\]/);

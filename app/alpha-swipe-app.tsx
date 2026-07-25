@@ -336,13 +336,31 @@ export function AlphaSwipeApp() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/signals", { signal: controller.signal })
+    void fetch("/api/signals?schema=research-v2", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
       .then((response) => {
         if (!response.ok) throw new Error("Signal refresh failed");
-        return response.json() as Promise<{ signals?: NewsItem[] }>;
+        return response.json() as Promise<{
+          schemaVersion?: number;
+          signals?: NewsItem[];
+        }>;
       })
       .then((payload) => {
-        if (payload.signals?.length) {
+        const hasCompleteResearch = payload.signals?.every(
+          (signal) =>
+            Boolean(signal.analysis?.macro) &&
+            Boolean(signal.analysis?.industry?.summary) &&
+            Boolean(signal.analysis?.fundamentals?.overview) &&
+            Boolean(signal.analysis?.fundamentals?.recentMarket) &&
+            Boolean(signal.analysis?.fundamentals?.recentEarnings),
+        );
+        if (
+          payload.schemaVersion === 2 &&
+          payload.signals?.length &&
+          hasCompleteResearch
+        ) {
           setSignals(payload.signals);
           setIndex(0);
         }
