@@ -20,6 +20,40 @@ export type EarningsAnalysis = {
   nextWatch: string;
 };
 
+export type SignalDirection = "long" | "short" | "neutral";
+
+export type SignalDegree = "strong" | "moderate" | "weak";
+
+export type ResearchMetric = {
+  label: string;
+  value: string;
+  change?: string;
+  tone?: "positive" | "negative" | "neutral";
+};
+
+export type SignalResearch = {
+  signal: {
+    direction: SignalDirection;
+    degree: SignalDegree;
+    label: string;
+    confidence: number;
+    description: string;
+  };
+  macro: string;
+  industry: {
+    name: string;
+    summary: string;
+  };
+  fundamentals: {
+    overview: string;
+    recentMarket: string;
+    recentEarnings: string;
+    metrics: ResearchMetric[];
+  };
+  risks: string[];
+  dataAsOf: string;
+};
+
 export type NewsItem = {
   id: string;
   category: NewsCategory;
@@ -41,6 +75,7 @@ export type NewsItem = {
   risk: string;
   theme: NewsTheme;
   earnings?: EarningsAnalysis;
+  analysis?: SignalResearch;
 };
 
 export const ALLOWED_SYMBOLS: SignalSymbol[] = [

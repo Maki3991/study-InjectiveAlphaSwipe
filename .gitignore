@@ -43,6 +43,7 @@ next-env.d.ts
 /outputs/
 /work/
 /data/.news-translation-cache.json
+/data/.news-analysis-cache.json
 
 # local reference corpus (not part of the deployable app)
 /injective-docs/

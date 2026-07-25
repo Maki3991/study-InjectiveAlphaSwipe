@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  Activity,
   BarChart3,
   Bot,
+  Building2,
   Check,
   CircleUserRound,
   Compass,
@@ -11,6 +13,7 @@ import {
   EyeOff,
   Flame,
   KeyRound,
+  Landmark,
   LoaderCircle,
   LockKeyhole,
   MessageCircle,
@@ -19,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  TriangleAlert,
   TrendingDown,
   TrendingUp,
   X,
@@ -27,6 +31,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   NEWS_ITEMS,
   type NewsItem,
+  type SignalResearch,
 } from "./news-data";
 import {
   deriveInjectiveAddress,
@@ -85,6 +90,168 @@ type AiChatResponse = {
 function formatChatError(error: unknown) {
   const message = error instanceof Error ? error.message : "AI 对话暂时不可用";
   return `AI 对话暂时不可用：${message}`;
+}
+
+function fallbackResearch(signal: NewsItem): SignalResearch {
+  return {
+    signal: {
+      direction: "neutral",
+      degree: "weak",
+      label: "中性观察",
+      confidence: signal.confidence,
+      description: signal.summary,
+    },
+    macro: "宏观快照正在加载，暂不对利率、美元与风险偏好作额外推断。",
+    industry: {
+      name: signal.category === "stock" ? "公司所属行业" : "数字资产行业",
+      summary: "行业数据正在加载，请结合新闻原文判断影响范围。",
+    },
+    fundamentals: {
+      overview: "标的基本面快照正在加载。",
+      recentMarket: "最新行情数据正在加载。",
+      recentEarnings:
+        signal.category === "stock"
+          ? "最近财报数据正在加载。"
+          : "加密资产没有公司财报，应关注网络使用、费用、供给与生态活跃度。",
+      metrics: [],
+    },
+    risks: [signal.risk || "单条新闻可能不足以形成持续交易信号。"],
+    dataAsOf: signal.published,
+  };
+}
+
+function SignalBack({
+  signal,
+  onClose,
+  onAskAi,
+}: {
+  signal: NewsItem;
+  onClose: () => void;
+  onAskAi: () => void;
+}) {
+  const research = signal.analysis ?? fallbackResearch(signal);
+  const SignalIcon =
+    research.signal.direction === "long"
+      ? TrendingUp
+      : research.signal.direction === "short"
+        ? TrendingDown
+        : Activity;
+
+  return (
+    <div className="card-face card-back">
+      <div className="back-header">
+        <span className="source-badge">{signal.marketLabel}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close signal details"
+        >
+          <X />
+        </button>
+        <h2>{signal.title}</h2>
+        <p>{signal.summary}</p>
+      </div>
+      <div className="back-scroll">
+        <section
+          className={`signal-verdict direction-${research.signal.direction}`}
+        >
+          <div className="verdict-icon">
+            <SignalIcon />
+          </div>
+          <div className="verdict-copy">
+            <span>新闻信号评价</span>
+            <strong>{research.signal.label}</strong>
+            <small>
+              {research.signal.degree === "strong"
+                ? "强"
+                : research.signal.degree === "moderate"
+                  ? "中"
+                  : "弱"}
+              度 · {research.signal.confidence}% 置信度
+            </small>
+          </div>
+          <p>{research.signal.description}</p>
+        </section>
+
+        <section className="research-section">
+          <div className="research-heading">
+            <Landmark />
+            <span>当前宏观分析</span>
+          </div>
+          <p>{research.macro}</p>
+        </section>
+
+        <section className="research-section">
+          <div className="research-heading">
+            <Building2 />
+            <span>行业分析 · {research.industry.name}</span>
+          </div>
+          <p>{research.industry.summary}</p>
+        </section>
+
+        <section className="research-section fundamentals-section">
+          <div className="research-heading">
+            <BarChart3 />
+            <span>标的基本面</span>
+          </div>
+          <div className="fundamental-copy">
+            <div>
+              <small>基本面判断</small>
+              <p>{research.fundamentals.overview}</p>
+            </div>
+            <div>
+              <small>最近行情</small>
+              <p>{research.fundamentals.recentMarket}</p>
+            </div>
+            <div>
+              <small>最近财报</small>
+              <p>{research.fundamentals.recentEarnings}</p>
+            </div>
+          </div>
+          {research.fundamentals.metrics.length > 0 && (
+            <div className="research-metrics">
+              {research.fundamentals.metrics.map((metric) => (
+                <div key={`${metric.label}-${metric.value}`}>
+                  <small>{metric.label}</small>
+                  <strong>{metric.value}</strong>
+                  {metric.change && (
+                    <span className={`metric-${metric.tone ?? "neutral"}`}>
+                      {metric.change}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="research-section risk-section">
+          <div className="research-heading">
+            <TriangleAlert />
+            <span>风险提示</span>
+          </div>
+          <ul>
+            {research.risks.map((risk) => (
+              <li key={risk}>{risk}</li>
+            ))}
+          </ul>
+        </section>
+
+        <div className="analysis-as-of">数据截至 {research.dataAsOf}</div>
+        <a
+          className="source-link"
+          href={signal.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          查看新闻原文 <ExternalLink />
+        </a>
+        <button className="ask-ai-button" type="button" onClick={onAskAi}>
+          <MessageCircle /> 和 AI 讨论这条信号
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function AlphaSwipeApp() {
@@ -583,87 +750,11 @@ export function AlphaSwipeApp() {
                         </div>
                       </div>
 
-                      <div className="card-face card-back">
-                        <div className="back-header">
-                          <span className="source-badge">{current.marketLabel}</span>
-                          <button
-                            type="button"
-                            onClick={() => setDetailsOpen(false)}
-                            aria-label="Close signal details"
-                          >
-                            <X />
-                          </button>
-                          <h2>{current.title}</h2>
-                          <p>{current.summary}</p>
-                        </div>
-                        <div className="back-scroll">
-                          {current.earnings && (
-                            <section className="earnings-panel">
-                              <div className="earnings-heading">
-                                <span>EARNINGS · {current.earnings.period}</span>
-                                <strong>{current.earnings.headline}</strong>
-                              </div>
-                              <div className="earnings-metrics">
-                                {current.earnings.metrics.map((metric) => (
-                                  <div key={metric.label}>
-                                    <small>{metric.label}</small>
-                                    <strong>{metric.value}</strong>
-                                    <span>{metric.change}</span>
-                                  </div>
-                                ))}
-                              </div>
-                              <p>{current.earnings.analysis}</p>
-                              <div className="next-watch">
-                                <small>Next watch</small>
-                                <strong>{current.earnings.nextWatch}</strong>
-                              </div>
-                            </section>
-                          )}
-                          <div className="thesis-grid">
-                            <div>
-                              <span className="thesis-label bull">
-                                <TrendingUp /> Bull case
-                              </span>
-                              <p>{current.bullCase}</p>
-                            </div>
-                            <div>
-                              <span className="thesis-label bear">
-                                <TrendingDown /> Bear case
-                              </span>
-                              <p>{current.bearCase}</p>
-                            </div>
-                          </div>
-                          <div className="fact-row">
-                            <div>
-                              <small>Catalyst</small>
-                              <strong>{current.catalyst}</strong>
-                            </div>
-                            <div>
-                              <small>Key risk</small>
-                              <strong>{current.risk}</strong>
-                            </div>
-                            <div>
-                              <small>Horizon</small>
-                              <strong>{current.horizon}</strong>
-                            </div>
-                          </div>
-                          <a
-                            className="source-link"
-                            href={current.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Read original signal <ExternalLink />
-                          </a>
-                          <button
-                            className="ask-ai-button"
-                            type="button"
-                            onClick={openSignalChat}
-                          >
-                            <MessageCircle /> Discuss this signal with AI
-                          </button>
-                        </div>
-                      </div>
+                      <SignalBack
+                        signal={current}
+                        onClose={() => setDetailsOpen(false)}
+                        onAskAi={openSignalChat}
+                      />
                     </div>
                   </article>
                 ) : (

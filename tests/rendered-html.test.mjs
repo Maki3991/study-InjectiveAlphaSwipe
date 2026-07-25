@@ -59,7 +59,9 @@ test("starter preview is removed and product assets are wired", async () => {
     aiRoute,
     signalsRoute,
     syncNews,
+    enrichNews,
     newsCache,
+    globalStyles,
     envExample,
   ] =
     await Promise.all([
@@ -72,7 +74,9 @@ test("starter preview is removed and product assets are wired", async () => {
       readFile(new URL("../app/api/ai/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/signals/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../scripts/sync-news.mjs", import.meta.url), "utf8"),
+      readFile(new URL("../scripts/enrich-news.mjs", import.meta.url), "utf8"),
       readFile(new URL("../data/news-cache.json", import.meta.url), "utf8"),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
       readFile(new URL("../.env.example", import.meta.url), "utf8"),
     ]);
 
@@ -115,18 +119,29 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(swipeApp, /fetch\("\/api\/signals"/);
   assert.match(swipeApp, /signalForQuestion/);
   assert.match(swipeApp, /ChatGPT API research only/);
+  assert.match(swipeApp, /新闻信号评价/);
+  assert.match(swipeApp, /当前宏观分析/);
+  assert.match(swipeApp, /行业分析/);
+  assert.match(swipeApp, /标的基本面/);
+  assert.match(swipeApp, /最近行情/);
+  assert.match(swipeApp, /最近财报/);
+  assert.match(swipeApp, /风险提示/);
+  assert.doesNotMatch(swipeApp, /className="earnings-panel"|className="thesis-grid"|className="fact-row"/);
   assert.doesNotMatch(swipeApp, /buildAssistantAnswer/);
   assert.doesNotMatch(swipeApp, /className="app-topbar"|className="feed-meta"|className="mainnet-live"/);
   assert.doesNotMatch(swipeApp, /Connect Keplr|connectKeplr|order-sheet|quick-order/);
   assert.doesNotMatch(swipeApp, /className="swipe-actions"|className="gesture-hint"/);
-  assert.match(aiRoute, /https:\/\/api\.openai\.com\/v1\/responses/);
+  assert.match(aiRoute, /DEFAULT_OPENAI_BASE_URL\s*=\s*"https:\/\/api\.openai\.com\/v1"/);
   assert.match(aiRoute, /DEFAULT_OPENAI_MODEL\s*=\s*"gpt-5\.6-sol"/);
   assert.match(aiRoute, /OPENAI_API_KEY/);
+  assert.match(aiRoute, /OPENAI_BASE_URL/);
   assert.match(aiRoute, /OPENAI_MODEL/);
   assert.match(aiRoute, /OPENAI_REASONING_EFFORT/);
   assert.match(aiRoute, /reasoning:\s*\{\s*effort:\s*reasoningEffort\s*\}/);
   assert.match(aiRoute, /store:\s*false/);
   assert.match(aiRoute, /ALLOWED_SYMBOLS/);
+  assert.match(aiRoute, /responsesUrl/);
+  assert.match(aiRoute, /analysis:\s*signal\.analysis/);
   assert.match(signalsRoute, /news-cache\.json/);
   assert.match(signalsRoute, /financialmodelingprep/);
   assert.doesNotMatch(signalsRoute, /news\.google\.com/);
@@ -137,10 +152,23 @@ test("starter preview is removed and product assets are wired", async () => {
   assert.match(syncNews, /thinking:\s*\{\s*type:\s*"enabled"\s*\}/);
   assert.match(syncNews, /glm-4\.5-air/);
   assert.match(syncNews, /chat\/completions/);
-  assert.match(packageJson, /"predev":\s*"node scripts\/sync-news\.mjs --if-missing"/);
-  assert.match(packageJson, /"news:refresh":\s*"node scripts\/sync-news\.mjs --refresh"/);
+  assert.match(enrichNews, /historical-price-eod\/full/);
+  assert.match(enrichNews, /income-statement/);
+  assert.match(enrichNews, /treasury-rates/);
+  assert.match(enrichNews, /economic-calendar/);
+  assert.match(enrichNews, /thinking:\s*\{\s*type:\s*"enabled"\s*\}/);
+  assert.match(packageJson, /"predev":\s*"node scripts\/sync-news\.mjs --if-missing && node scripts\/enrich-news\.mjs --if-missing"/);
+  assert.match(packageJson, /"news:refresh":\s*"node scripts\/sync-news\.mjs --refresh && node scripts\/enrich-news\.mjs --refresh"/);
   assert.match(newsCache, /"source":\s*"financialmodelingprep"/);
+  assert.match(newsCache, /"direction":\s*"(?:long|short|neutral)"/);
+  assert.match(newsCache, /"macroSnapshot"/);
+  assert.match(newsCache, /"assetSnapshots"/);
+  assert.match(globalStyles, /\.signal-verdict/);
+  assert.match(globalStyles, /\.research-section/);
+  assert.match(globalStyles, /\.research-metrics/);
+  assert.doesNotMatch(globalStyles, /\.earnings-panel|\.thesis-grid|\.fact-row/);
   assert.match(envExample, /OPENAI_API_KEY=/);
+  assert.match(envExample, /OPENAI_BASE_URL=https:\/\/api\.openai\.com\/v1/);
   assert.match(envExample, /OPENAI_MODEL=gpt-5\.6-sol/);
   assert.match(envExample, /OPENAI_REASONING_EFFORT=low/);
   assert.match(envExample, /FMP_API_KEY=/);

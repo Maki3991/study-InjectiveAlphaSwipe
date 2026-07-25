@@ -3,10 +3,12 @@ import {
   NEWS_ITEMS,
   type EarningsAnalysis,
   type NewsItem,
+  type ResearchMetric,
+  type SignalResearch,
   type SignalSymbol,
 } from "../../news-data";
 
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-sol";
 const DEFAULT_REASONING_EFFORT = "low";
 const MAX_QUESTION_LENGTH = 1_200;
@@ -14,6 +16,7 @@ const MAX_FIELD_LENGTH = 1_000;
 
 type RuntimeEnv = {
   OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
   OPENAI_MODEL?: string;
   OPENAI_REASONING_EFFORT?: string;
 };
@@ -95,6 +98,86 @@ function sanitizeEarnings(value: unknown): EarningsAnalysis | undefined {
   };
 }
 
+function sanitizeMetric(value: unknown): ResearchMetric | null {
+  if (!value || typeof value !== "object") return null;
+  const metric = value as Partial<ResearchMetric>;
+  const label = clampText(metric.label, "", 80);
+  const metricValue = clampText(metric.value, "", 120);
+  if (!label || !metricValue) return null;
+  return {
+    label,
+    value: metricValue,
+    change: clampText(metric.change, "", 120) || undefined,
+    tone:
+      metric.tone === "positive" ||
+      metric.tone === "negative" ||
+      metric.tone === "neutral"
+        ? metric.tone
+        : "neutral",
+  };
+}
+
+function sanitizeResearch(value: unknown): SignalResearch | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const research = value as Partial<SignalResearch>;
+  const signal = research.signal;
+  const fundamentals = research.fundamentals;
+  const industry = research.industry;
+  if (!signal || !fundamentals || !industry) return undefined;
+
+  const direction =
+    signal.direction === "long" ||
+    signal.direction === "short" ||
+    signal.direction === "neutral"
+      ? signal.direction
+      : "neutral";
+  const degree =
+    signal.degree === "strong" ||
+    signal.degree === "moderate" ||
+    signal.degree === "weak"
+      ? signal.degree
+      : "weak";
+  const metrics = Array.isArray(fundamentals.metrics)
+    ? fundamentals.metrics
+        .slice(0, 10)
+        .map(sanitizeMetric)
+        .filter((metric): metric is ResearchMetric => Boolean(metric))
+    : [];
+  const risks = Array.isArray(research.risks)
+    ? research.risks
+        .slice(0, 6)
+        .map((risk) => clampText(risk, "", 500))
+        .filter(Boolean)
+    : [];
+
+  return {
+    signal: {
+      direction,
+      degree,
+      label: clampText(signal.label, "中性观察", 80),
+      confidence:
+        typeof signal.confidence === "number" &&
+        Number.isFinite(signal.confidence)
+          ? Math.min(99, Math.max(1, Math.round(signal.confidence)))
+          : 55,
+      description: clampText(signal.description),
+    },
+    macro: clampText(research.macro),
+    industry: {
+      name: clampText(industry.name, "行业", 120),
+      summary: clampText(industry.summary),
+    },
+    fundamentals: {
+      overview: clampText(fundamentals.overview),
+      recentMarket: clampText(fundamentals.recentMarket),
+      recentEarnings: clampText(fundamentals.recentEarnings),
+      metrics,
+    },
+    risks,
+    dataAsOf: clampText(research.dataAsOf, "", 120),
+  };
+}
+
 function resolveSignal(body: AiRequestBody) {
   const postedSignal = postedSignalObject(body.signal);
   const marketQuery = isAllowedSymbol(postedSignal.marketQuery)
@@ -135,6 +218,7 @@ function resolveSignal(body: AiRequestBody) {
     catalyst: clampText(postedSignal.catalyst, base.catalyst),
     risk: clampText(postedSignal.risk, base.risk),
     earnings: sanitizeEarnings(postedSignal.earnings) || base.earnings,
+    analysis: sanitizeResearch(postedSignal.analysis) || base.analysis,
   } satisfies NewsItem;
 }
 
@@ -150,15 +234,15 @@ function buildSignalContext(signal: NewsItem) {
     source: signal.source,
     published: signal.published,
     tags: signal.tags,
-    impact: signal.impact,
-    confidence: signal.confidence,
-    horizon: signal.horizon,
-    bullCase: signal.bullCase,
-    bearCase: signal.bearCase,
-    catalyst: signal.catalyst,
-    risk: signal.risk,
-    earnings: signal.earnings,
+    analysis: signal.analysis,
   };
+}
+
+function responsesUrl(baseUrl: string) {
+  const normalized = baseUrl.replace(/\/+$/, "");
+  return normalized.endsWith("/responses")
+    ? normalized
+    : `${normalized}/responses`;
 }
 
 function extractAnswer(payload: OpenAiResponsePayload) {
@@ -176,12 +260,14 @@ function extractAnswer(payload: OpenAiResponsePayload) {
 }
 
 export async function POST(request: Request) {
-  const [apiKey, configuredModel, configuredReasoningEffort] =
+  const [apiKey, configuredBaseUrl, configuredModel, configuredReasoningEffort] =
     await Promise.all([
       readRuntimeEnv("OPENAI_API_KEY"),
+      readRuntimeEnv("OPENAI_BASE_URL"),
       readRuntimeEnv("OPENAI_MODEL"),
       readRuntimeEnv("OPENAI_REASONING_EFFORT"),
     ]);
+  const endpoint = responsesUrl(configuredBaseUrl || DEFAULT_OPENAI_BASE_URL);
   const model = configuredModel || DEFAULT_OPENAI_MODEL;
   const reasoningEffort = normalizeReasoningEffort(
     configuredReasoningEffort || DEFAULT_REASONING_EFFORT,
@@ -234,7 +320,7 @@ export async function POST(request: Request) {
   );
 
   try {
-    const response = await fetch(OPENAI_RESPONSES_URL, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -246,7 +332,8 @@ export async function POST(request: Request) {
           "You are AlphaSwipe Signal AI, a concise market research copilot for crypto and tokenized/RWA-related perpetual signals.",
           "Answer in the user's language. If the user writes Chinese, answer in Chinese.",
           "Use only the supplied signal context plus clearly labeled general market reasoning. Do not invent live prices, order-book depth, account balances, or unprovided facts.",
-          "Separate what the source says from AlphaSwipe's bull/bear thesis. Call out uncertainty and what data would confirm or invalidate the thesis.",
+          "Use the supplied signal evaluation, macro view, industry view, fundamentals, market metrics, earnings analysis and risks. Clearly separate source facts from analysis.",
+          "Call out uncertainty and what data would confirm or invalidate the signal.",
           "This chat cannot place trades. Do not give personalized financial advice; frame trade-related answers as risk, scenario, sizing, and execution considerations.",
           "Keep the answer compact: usually 2-5 short paragraphs or bullets.",
         ].join("\n"),
@@ -261,7 +348,7 @@ export async function POST(request: Request) {
         text: { format: { type: "text" }, verbosity: "medium" },
         store: false,
       }),
-      signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(45_000),
     });
 
     const payload = (await response.json().catch(() => ({}))) as OpenAiResponsePayload;
